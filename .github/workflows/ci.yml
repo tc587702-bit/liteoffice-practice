@@ -1,0 +1,40 @@
+name: ci
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+
+jobs:
+  smoke:
+    # 关键：在 GitHub 的全新 Linux 机器上从零跑一次。
+    # 本项目是零构建（原生 ES module），所以 CI 只做两件事：
+    #   1. 所有 .js 语法检查（node --check）
+    #   2. 起一个静态服务器，确认首页能访问
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: JS 语法检查
+        run: |
+          set -e
+          find code/frontend/js -name '*.js' -print0 | xargs -0 -n1 node --check
+          echo "所有 JS 文件语法通过"
+
+      - name: 首页可访问（冒烟测试）
+        run: |
+          set -e
+          python3 -m http.server 5191 --directory code/frontend &
+          sleep 1
+          curl -fsS http://127.0.0.1:5191/ | grep -q 'LiteOffice'
+          curl -fsS http://127.0.0.1:5191/js/main.js > /dev/null
+          curl -fsS http://127.0.0.1:5191/styles/app.css > /dev/null
+          echo "静态资源全部可访问"
+
+      - name: 确认没有遗漏提交的 lockfile
+        run: |
+          test -f pnpm-lock.yaml && echo "pnpm-lock.yaml 存在"

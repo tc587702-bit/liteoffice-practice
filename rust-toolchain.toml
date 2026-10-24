@@ -1,0 +1,6 @@
+# Tauri 需要 Rust。首次 `cargo build` 成功后，把 channel 改成实测到的具体版本号
+# （例如 "1.82.0"）再提交，这样四个人编译出的产物一致。
+# 只有构建桌面版时才需要这个文件生效；Web 版不需要 Rust。
+[toolchain]
+channel = "stable"
+components = ["rustfmt", "clippy"]

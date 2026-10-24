@@ -147,3 +147,16 @@ vite.config.ts.timestamp-*
 
 # Turbo Repo
 .turbo
+
+# ---- LiteOffice ----
+# Tauri 编译产物
+**/src-tauri/target/
+# Office 内核产物（含商业字体，禁止入库/分发，见规划 6.3）
+code/frontend/public/editor/
+code/core_engine/*.tgz
+# 引擎下载缓存
+.cache/
+# 测试文档集（体积大，放测试表链接而不是库）
+tests/fixtures/*.docx
+tests/fixtures/*.xlsx
+tests/fixtures/*.pptx

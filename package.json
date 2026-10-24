@@ -1,0 +1,23 @@
+{
+  "name": "liteoffice",
+  "version": "0.1.0",
+  "private": true,
+  "description": "本地优先的轻量文档工作台（桌面为主，Web 为第二入口）",
+  "packageManager": "pnpm@12.15.0",
+  "engines": {
+    "node": ">=20 <21"
+  },
+  "scripts": {
+    "serve": "python3 -m http.server 5191 --directory code/frontend",
+    "dev": "python3 -m http.server 5191 --directory code/frontend",
+    "check": "node --check code/frontend/js/main.js",
+    "bootstrap": "bash bootstrap.sh",
+    "engine": "node code/core_engine/fetch-engine.mjs"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "@tauri-apps/cli"
+    ]
+  }
+}
