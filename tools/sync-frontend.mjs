@@ -26,7 +26,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const REPO = path.resolve(__dirname, '..')
 const TARGET = path.join(REPO, 'code', 'frontend')
 const WORKSPACES = 'C:\\Users\\16595\\Documents\\modao\\workspaces'
-const EXCLUDE = /[\\/](node_modules|dist|\.git)[\\/]/
+const EXCLUDE = /[\\/](node_modules|dist|\.git)[\\/]|vite\.dev\.config\.mjs|^\.vite-cache/
 
 const args = process.argv.slice(2)
 const dryRun = args.includes('--dry-run')
