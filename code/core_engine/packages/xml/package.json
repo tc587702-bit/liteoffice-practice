@@ -1,0 +1,11 @@
+{
+  "name": "@liteoffice/xml",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "description": "低分配流式 XML 拉取解析器（无 DOM、无 xmldom 依赖）",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

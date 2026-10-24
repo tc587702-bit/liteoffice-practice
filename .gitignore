@@ -147,3 +147,8 @@ vite.config.ts.timestamp-*
 
 # Turbo Repo
 .turbo
+# ---------- core_engine 生成产物 ----------
+code/core_engine/build/
+code/core_engine/dist/
+code/core_engine/bench/out/fixtures/
+code/core_engine/**/__pycache__/

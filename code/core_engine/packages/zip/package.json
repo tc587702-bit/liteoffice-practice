@@ -1,0 +1,11 @@
+{
+  "name": "@liteoffice/zip",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "description": "流式 ZIP 容器读写（原生 DecompressionStream，无 JSZip 依赖）",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

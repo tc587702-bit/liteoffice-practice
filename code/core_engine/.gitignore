@@ -1,0 +1,29 @@
+# 依赖与产物（本项目零依赖：这些目录永远不该存在/不该提交）
+node_modules/
+package-lock.json
+build/
+dist/
+
+# 基准与验证报告（可随时重跑生成）
+bench/out/
+
+# 测试夹具生成物
+test/fixtures/generated/
+
+# ---- 开发期临时文件 ----
+# 说明：代理/贡献者常把一次性调试脚本与转储放在根目录。这些不属于交付物，
+# 必须忽略，否则开源发布时会混进去。实测一次收尾阶段根目录曾积累 50+ 个 tmp-*.mjs。
+tmp-*
+tmp_*
+*/tmp-*
+_probe*.ts
+_diag*
+test/_*
+*.tmp
+*.log
+# 调试转储（根目录）
+/dbg*.txt
+/full-test.txt
+/out-*.txt
+/content-dump.txt
+/samples.txt

@@ -1,0 +1,2865 @@
+<!DOCTYPE html>
+
+<html class="h-full w-full" lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>LiteOffice — 打开一个文档</title>
+<script src="vendor/tailwindcss.js"></script>
+<script src="vendor/iconify-icon.min.js"></script>
+<style>
+    :root {
+      font-family: -apple-system, "PingFang SC", sans-serif;
+      color-scheme: dark;
+      --bg: #1C1C1E;
+      --ink: #F5F5F7;
+      --ink-soft: #98989D;
+      --blue: #0A84FF;
+      --ease: cubic-bezier(0.28, 0.11, 0.32, 1);
+      --card: #2C2C2E;
+      --hairline: rgba(255, 255, 255, 0.08);
+    }
+    html, body, button, input, select, textarea {
+      font-family: -apple-system, "PingFang SC", sans-serif;
+    }
+    html {
+      background: #000000;
+    }
+    body {
+      overflow: hidden;
+      height: 100vh;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      letter-spacing: -0.008em;
+      color: #F5F5F7;
+      background-color: #000000;
+      background-image:
+        radial-gradient(58% 44% at 22% 0%, rgba(10, 132, 255, 0.09) 0%, rgba(10, 132, 255, 0) 68%),
+        radial-gradient(52% 42% at 88% 100%, rgba(122, 92, 255, 0.07) 0%, rgba(122, 92, 255, 0) 70%);
+      background-repeat: no-repeat;
+      background-attachment: fixed;
+    }
+    h1, h2, h3, p { margin: 0; }
+    .no-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+    /* 右侧主内容区：独立滚动 + macOS 式极细悬浮滚动条（无灰色占位轨道） */
+    .app-scroll {
+      height: calc(100vh - 68px);
+      overflow-y: auto;
+      overflow-x: hidden;
+      overscroll-behavior: contain;
+      scrollbar-width: none;
+    }
+    /* 原生滚动条轨道隐藏，WebKit 下只保留 6px 悬浮细条 */
+    .app-scroll::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    .app-scroll::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    .app-scroll::-webkit-scrollbar-thumb {
+      background-color: rgba(255, 255, 255, 0.24);
+      border-radius: 999px;
+    }
+    .app-scroll::-webkit-scrollbar-thumb:hover,
+    .scroll-rail.is-hover .scroll-rail-thumb {
+      background-color: rgba(255, 255, 255, 0.42);
+    }
+    .app-scroll::-webkit-scrollbar-corner {
+      background: transparent;
+    }
+    .app-scroll-inner {
+      padding-bottom: 48px;
+    }
+    /* Windows / Firefox 兜底：右侧浮层细滚动条，替代占位滚动槽 */
+    .scroll-rail {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      right: 2px;
+      z-index: 30;
+      width: 6px;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.3s ease;
+    }
+    .scroll-rail.is-active {
+      opacity: 1;
+    }
+    .scroll-rail-thumb {
+      position: absolute;
+      top: 0;
+      right: 0;
+      width: 6px;
+      min-height: 36px;
+      border-radius: 999px;
+      background-color: rgba(255, 255, 255, 0.24);
+      transition: background-color 0.2s ease;
+      will-change: transform;
+    }
+    /* 顶栏：半透明深灰 + 磨砂玻璃，透出底层光晕 */
+    .topbar-glass {
+      background-color: rgba(28, 28, 30, 0.75);
+      -webkit-backdrop-filter: blur(20px);
+      backdrop-filter: blur(20px);
+      border-color: rgba(255, 255, 255, 0.08);
+      transition: background-color 0.3s ease, backdrop-filter 0.3s ease, -webkit-backdrop-filter 0.3s ease, border-color 0.3s ease;
+    }
+    /* 滚动 > 50px：顶栏压暗、加强磨砂，并显出一道底部边框 */
+    .topbar-glass.is-scrolled {
+      background-color: rgba(28, 28, 30, 0.8);
+      -webkit-backdrop-filter: blur(20px);
+      backdrop-filter: blur(20px);
+      border-bottom-color: rgba(255, 255, 255, 0.12);
+    }
+    /* 左侧边栏：同样为半透明深灰磨砂，内容滚过时透出底层光晕 */
+    .sidebar-glass {
+      background-color: rgba(28, 28, 30, 0.75);
+      -webkit-backdrop-filter: blur(20px);
+      backdrop-filter: blur(20px);
+      border-right: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    /* 微交互：Hover 提亮、按下 scale(0.96)、松开弹性回弹 */
+    button,
+    [role="button"],
+    a {
+      transition: all 0.3s cubic-bezier(0.25, 0.1, 0.25, 1);
+      -webkit-tap-highlight-color: transparent;
+    }
+    button:not(:disabled):not(:active),
+    [role="button"]:not(:active),
+    a:not(:active) {
+      transition:
+        transform 0.48s cubic-bezier(0.34, 1.56, 0.64, 1),
+        filter 0.3s cubic-bezier(0.25, 0.1, 0.25, 1),
+        background-color 0.3s cubic-bezier(0.25, 0.1, 0.25, 1),
+        border-color 0.3s cubic-bezier(0.25, 0.1, 0.25, 1),
+        color 0.3s cubic-bezier(0.25, 0.1, 0.25, 1);
+    }
+    button:not(:disabled):hover,
+    [role="button"]:hover,
+    a:hover {
+      filter: brightness(1.1);
+    }
+    button:not(:disabled):active,
+    [role="button"]:active,
+    a:active {
+      transform: scale(0.96);
+      transition: transform 0.12s cubic-bezier(0.25, 0.1, 0.25, 1), filter 0.3s cubic-bezier(0.25, 0.1, 0.25, 1);
+    }
+    button.pill-disabled:hover,
+    button.pill-disabled:active,
+    .mac-card-hover:hover,
+    .mac-card-hover:active {
+      filter: none;
+    }
+    .mac-card-hover:active,
+    .drop-card:active {
+      transform: none;
+    }
+    /* macOS 卡片：24px 圆角 + 极细描边，无阴影 */
+    .mac-card {
+      background: #303032;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 24px;
+      box-shadow: none;
+      transition: border-color 420ms var(--ease), transform 420ms var(--ease), background-color 420ms var(--ease);
+    }
+    .mac-card-hover:hover {
+      box-shadow: none;
+      border-color: rgba(255, 255, 255, 0.08);
+    }
+    /* 拖拽卡片：清晰的极细虚线描边 */
+    .drop-card {
+      border: 1px dashed rgba(255, 255, 255, 0.12) !important;
+      background-color: transparent;
+      transition:
+        border-color 0.3s cubic-bezier(0.25, 0.1, 0.25, 1),
+        border-style 0.3s cubic-bezier(0.25, 0.1, 0.25, 1),
+        background-color 0.3s cubic-bezier(0.25, 0.1, 0.25, 1),
+        background-image 0.3s cubic-bezier(0.25, 0.1, 0.25, 1),
+        box-shadow 0.3s cubic-bezier(0.25, 0.1, 0.25, 1);
+    }
+    .drop-card:hover,
+    .drop-card:active {
+      border-color: rgba(255, 255, 255, 0.28) !important;
+      background-image: radial-gradient(120% 120% at 50% 40%, rgba(255, 255, 255, 0.035) 0%, rgba(255, 255, 255, 0) 70%);
+    }
+    /* 真实拖拽悬停：虚线变蓝变实 + 微弱蓝色径向光 + 图标浮动 */
+    .drop-card.is-dragover {
+      border-style: solid !important;
+      border-color: rgba(10, 132, 255, 0.72) !important;
+      background-image: radial-gradient(120% 110% at 50% 42%, rgba(10, 132, 255, 0.16) 0%, rgba(10, 132, 255, 0.05) 44%, rgba(10, 132, 255, 0) 74%);
+      box-shadow: inset 0 0 0 1px rgba(10, 132, 255, 0.14);
+    }
+    .drop-card.is-dragover .drop-icon,
+    .drop-card.is-dragover .drop-icon iconify-icon {
+      color: #0A84FF;
+    }
+    .drop-card.is-dragover .drop-icon {
+      animation: dropIconFloat 1.5s ease-in-out infinite;
+    }
+    /* Hero 右侧拖拽框：与底部拖拽卡片共用 .drop-card 行为，仅做客制化排布 */
+    .hero-drop {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      min-height: 132px;
+      padding: 26px 20px;
+      border-radius: 24px;
+      text-align: center;
+      animation: dropBreath 6s ease-in-out infinite;
+    }
+    .hero-drop:hover,
+    .hero-drop.is-dragover {
+      animation: none;
+    }
+    .hero-drop .drop-icon {
+      display: grid;
+      place-items: center;
+      width: 40px;
+      height: 40px;
+      border-radius: 12px;
+      background: rgba(10, 132, 255, 0.15);
+      color: #0A84FF;
+      transition: color 0.3s ease, background-color 0.3s ease;
+    }
+    .hero-drop:hover .drop-icon {
+      color: #0A84FF;
+      background: rgba(10, 132, 255, 0.2);
+    }
+    /* 拖拽虚线框：缓慢呼吸的背景明暗交替 */
+    @keyframes dropBreath {
+      0%, 100% { background-color: rgba(255, 255, 255, 0.012); }
+      50% { background-color: rgba(255, 255, 255, 0.045); }
+    }
+    .hero-drop.is-dragover {
+      border-style: solid !important;
+      border-color: rgba(10, 132, 255, 0.72) !important;
+      background-color: rgba(10, 132, 255, 0.04);
+      background-image: radial-gradient(120% 110% at 50% 50%, rgba(10, 132, 255, 0.16) 0%, rgba(10, 132, 255, 0.04) 46%, rgba(10, 132, 255, 0) 76%);
+      box-shadow: inset 0 0 0 1px rgba(10, 132, 255, 0.14);
+    }
+    .hero-drop.is-dragover .drop-icon {
+      background: rgba(10, 132, 255, 0.16);
+      color: #0A84FF;
+      animation: dropIconFloat 1.5s ease-in-out infinite;
+    }
+    .hero-drop:hover,
+    .hero-drop:active {
+      border-color: rgba(255, 255, 255, 0.26) !important;
+      background-image: radial-gradient(120% 120% at 50% 40%, rgba(255, 255, 255, 0.035) 0%, rgba(255, 255, 255, 0) 70%);
+    }
+    .hero-drop.is-dragover {
+      border-color: rgba(10, 132, 255, 0.72) !important;
+    }
+    /* 真实文件预览区：沿用深色纸张基调，只负责展示解析出的真实内容 */
+    .real-doc {
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
+      max-height: 560px;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      scrollbar-width: none;
+    }
+    .real-doc::-webkit-scrollbar {
+      display: none;
+    }
+    .real-doc h1, .real-doc h2, .real-doc h3, .real-doc h4 {
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      color: #F5F5F7;
+      line-height: 1.25;
+    }
+    .real-doc h1 { font-size: 28px; margin-top: 18px; }
+    .real-doc h2 { font-size: 22px; margin-top: 22px; }
+    .real-doc h3 { font-size: 18px; margin-top: 18px; }
+    .real-doc h4, .real-doc h5, .real-doc h6 { font-size: 15px; margin-top: 14px; }
+    .real-doc p { margin-top: 10px; font-size: 14px; line-height: 1.8; color: #C7C7CC; }
+    .real-doc ul, .real-doc ol { margin-top: 10px; padding-left: 22px; font-size: 14px; line-height: 1.8; color: #C7C7CC; }
+    .real-doc ul { list-style: disc; }
+    .real-doc ol { list-style: decimal; }
+    .real-doc li { margin-top: 4px; }
+    .real-doc blockquote {
+      margin-top: 14px;
+      padding: 14px 18px;
+      border-left: 2px solid #0A84FF;
+      background: rgba(255, 255, 255, 0.04);
+      border-radius: 0 12px 12px 0;
+      font-size: 14px;
+      color: #C7C7CC;
+    }
+    .real-doc pre {
+      margin-top: 14px;
+      padding: 16px 18px;
+      overflow-x: auto;
+      background: #1C1C1E;
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 14px;
+    }
+    .real-doc code {
+      font-family: "SF Mono", ui-monospace, Menlo, monospace;
+      font-size: 12px;
+      color: #F5F5F7;
+    }
+    .real-doc p code, .real-doc li code {
+      padding: 1px 5px;
+      border-radius: 5px;
+      background: rgba(255, 255, 255, 0.06);
+    }
+    .real-doc a { color: #0A84FF; text-decoration: underline; text-underline-offset: 3px; }
+    .real-doc hr { margin: 20px 0; border: 0; border-top: 1px solid rgba(255, 255, 255, 0.06); }
+    .real-doc table { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 12px; }
+    .real-doc th, .real-doc td {
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      padding: 8px 10px;
+      text-align: left;
+      vertical-align: top;
+      color: #C7C7CC;
+    }
+    .real-doc th { color: #F5F5F7; font-weight: 500; background: rgba(255, 255, 255, 0.04); }
+    .real-doc td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .real-doc .doc-page {
+      margin-top: 14px;
+      padding: 20px 22px;
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.02);
+    }
+    .real-doc .doc-page-label {
+      font-size: 11px;
+      color: #7C7C81;
+      letter-spacing: 0.04em;
+    }
+    .real-doc .sheet-tabs { display: flex; flex-wrap: wrap; gap: 6px; }
+    .real-doc .sheet-tab {
+      height: 28px;
+      padding: 0 12px;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      background: transparent;
+      color: #98989D;
+      font-size: 12px;
+    }
+    .real-doc .sheet-tab.is-active {
+      background: rgba(10, 132, 255, 0.14);
+      border-color: transparent;
+      color: #0A84FF;
+    }
+    .real-doc .doc-note { margin-top: 10px; font-size: 11px; color: #7C7C81; line-height: 1.7; }
+    .real-doc .doc-empty { margin-top: 18px; font-size: 13px; color: #98989D; }
+    .real-doc .doc-warning {
+      margin-bottom: 16px;
+      padding: 12px 16px;
+      border-radius: 14px;
+      border: 1px solid rgba(255, 159, 10, 0.28);
+      background: rgba(255, 159, 10, 0.08);
+      font-size: 12px;
+      line-height: 1.7;
+      color: #FFB340;
+    }
+    /* 格式胶囊：微亮半透底、8px 圆角、4px 8px 内边距 */
+    .format-chip {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.06);
+      padding: 4px 8px;
+      font-size: 12px;
+      line-height: 1.4;
+      letter-spacing: 0.01em;
+      color: #A1A1A6;
+    }
+    /* 侧边栏全局导航：macOS 风格的上中下三段 */
+    .nav-item {
+      position: relative;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      width: 100%;
+      height: 36px;
+      padding: 0 12px;
+      border: 1px solid transparent;
+      border-radius: 9px;
+      font-size: 13px;
+      font-weight: 500;
+      line-height: 1;
+      color: #A1A1A6;
+      background: transparent;
+      transition: background-color 0.3s cubic-bezier(0.25, 0.1, 0.25, 1), color 0.3s cubic-bezier(0.25, 0.1, 0.25, 1), border-color 0.3s cubic-bezier(0.25, 0.1, 0.25, 1);
+    }
+    .nav-item iconify-icon,
+    .nav-item svg {
+      flex: none;
+      font-size: 16px;
+      line-height: 1;
+    }
+    .nav-item.is-active {
+      color: #FFFFFF;
+      background: rgba(255, 255, 255, 0.08);
+      border-color: rgba(255, 255, 255, 0.06);
+    }
+    .nav-item.is-active iconify-icon,
+    .nav-item.is-active svg {
+      color: #0A84FF;
+    }
+    .nav-item.is-planned {
+      color: #98989D;
+      cursor: default;
+    }
+    .nav-item.is-planned:hover,
+    .nav-item.is-planned:focus-visible {
+      color: #C7C7CC;
+      background: rgba(255, 255, 255, 0.04);
+      filter: none;
+    }
+    .nav-badge {
+      margin-left: auto;
+      flex: none;
+      font-size: 10px;
+      font-weight: 500;
+      line-height: 1.4;
+      color: #636366;
+      letter-spacing: 0.02em;
+    }
+    .session-label {
+      font-size: 11px;
+      line-height: 1.5;
+      color: #8E8E93;
+    }
+    /* 窄屏：隐私长条回退为单列堆叠 */
+    @media (max-width: 640px) {
+      .privacy-card {
+        padding: 20px;
+      }
+    }
+    /* 隐私长条 1x4：左图标 + 右文字的等距卖点 */
+    .privacy-grid {
+      display: flex;
+      flex-wrap: nowrap;
+      align-items: stretch;
+      gap: 10px;
+    }
+    @media (max-width: 900px) and (min-width: 641px) {
+      .privacy-grid {
+        flex-wrap: wrap;
+      }
+      .privacy-cell {
+        flex: 1 1 calc(50% - 5px);
+      }
+    }
+    .privacy-cell {
+      display: flex;
+      flex: 1 1 0;
+      min-width: 0;
+      flex-direction: row;
+      align-items: center;
+      gap: 10px;
+      border-radius: 16px;
+      padding: 12px 14px;
+      background: rgba(255, 255, 255, 0.025);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      transition: all 0.2s ease;
+    }
+    .privacy-cell:hover {
+      transform: translateY(-2px);
+      background: rgba(255, 255, 255, 0.045);
+      border-color: rgba(255, 255, 255, 0.15);
+    }
+    .privacy-icon {
+      flex: none;
+      display: grid;
+      place-items: center;
+      width: 28px;
+      height: 28px;
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.08);
+      color: #A1A1A6;
+    }
+    @keyframes dropIconFloat {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-6px); }
+    }
+    /* 药丸按钮 */
+    .pill {
+      border-radius: 999px;
+    }
+    .pill:not(:active) {
+      transition:
+        transform 0.48s cubic-bezier(0.34, 1.56, 0.64, 1),
+        filter 0.3s cubic-bezier(0.25, 0.1, 0.25, 1),
+        background-color 0.3s cubic-bezier(0.25, 0.1, 0.25, 1),
+        color 0.3s cubic-bezier(0.25, 0.1, 0.25, 1),
+        border-color 0.3s cubic-bezier(0.25, 0.1, 0.25, 1);
+    }
+    .pill:active {
+      transform: scale(0.96);
+      transition: transform 0.12s cubic-bezier(0.25, 0.1, 0.25, 1), filter 0.3s cubic-bezier(0.25, 0.1, 0.25, 1);
+    }
+    .pill-primary {
+      background: #0A84FF;
+      color: #ffffff;
+      font-weight: 500;
+      border-radius: 999px;
+      background-image: none;
+      box-shadow: 0 4px 16px rgba(10, 132, 255, 0.3);
+    }
+    .pill-primary:hover {
+      background: #2E95FF;
+      background-image: none;
+      box-shadow: 0 4px 16px rgba(10, 132, 255, 0.3);
+    }
+    .pill-secondary {
+      background: #3A3A3C;
+      color: #FFFFFF;
+    }
+    .pill-secondary:hover {
+      background: #48484A;
+      color: #FFFFFF;
+    }
+    .pill-disabled {
+      background: rgba(255, 255, 255, 0.04);
+      color: #636366;
+      cursor: not-allowed;
+    }
+    .logo-mark {
+      background: transparent;
+      color: #F5F5F7;
+      font-style: normal;
+      font-weight: 600;
+      font-family: -apple-system, "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+      letter-spacing: -0.01em;
+      font-synthesis: none;
+    }
+    /* 底层流体：一蓝一紫两个 400px 模糊色块，20s 贝塞尔曲线游走 */
+    .aurora-layer {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      overflow: hidden;
+      pointer-events: none;
+    }
+    .aurora-blob {
+      position: absolute;
+      width: 400px;
+      height: 400px;
+      border-radius: 50%;
+      filter: blur(80px);
+      will-change: transform, opacity;
+    }
+    .aurora-blue {
+      left: -80px;
+      bottom: -120px;
+      opacity: 0.9;
+      background: rgba(10, 132, 255, 0.15);
+      animation: auroraDriftA 20s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+    }
+    .aurora-purple {
+      right: -80px;
+      bottom: -140px;
+      opacity: 0.9;
+      background: rgba(191, 90, 242, 0.15);
+      animation: auroraDriftB 20s cubic-bezier(0.42, 0, 0.58, 1) infinite;
+    }
+    @keyframes auroraDriftA {
+      0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+      25% { transform: translate3d(180px, -140px, 0) scale(1.08); }
+      50% { transform: translate3d(90px, -320px, 0) scale(0.94); }
+      75% { transform: translate3d(-140px, -200px, 0) scale(1.05); }
+    }
+    @keyframes auroraDriftB {
+      0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+      25% { transform: translate3d(-160px, -180px, 0) scale(0.95); }
+      50% { transform: translate3d(-300px, -60px, 0) scale(1.06); }
+      75% { transform: translate3d(-120px, -280px, 0) scale(1.02); }
+    }
+    /* 上层背景板：与极光配合的 40px 磨砂 */
+    .page-surface {
+      background-color: rgba(28, 28, 30, 0.32);
+      -webkit-backdrop-filter: blur(40px);
+      backdrop-filter: blur(40px);
+    }
+    /* 主卡片聚光灯：鼠标跟随的白色径向光，不拦截点击 */
+    .spotlight-card {
+      position: relative;
+      isolation: isolate;
+    }
+    .spotlight-card::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      z-index: 0;
+      border-radius: inherit;
+      background: radial-gradient(
+        300px circle at var(--spot-x, 50%) var(--spot-y, 50%),
+        rgba(255, 255, 255, 0.05),
+        transparent 62%
+      );
+      opacity: 0;
+      transition: opacity 520ms ease-in-out;
+      pointer-events: none;
+    }
+    .spotlight-card.is-spotlight::before {
+      opacity: 1;
+    }
+    /* 拖拽卡片 Hover：上传图标箭头连续向上跃动 */
+    .drop-card:hover .drop-icon iconify-icon,
+    .drop-card:hover .drop-icon svg {
+      animation: iconJump 0.9s cubic-bezier(0.34, 1.56, 0.64, 1) infinite;
+    }
+    .drop-card.is-dragover .drop-icon iconify-icon,
+    .drop-card.is-dragover .drop-icon svg {
+      animation: none;
+    }
+    @keyframes iconJump {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-4px); }
+    }
+    /* 数字滚动：老虎机竖排数字窗口 */
+    .digit-roller {
+      display: inline-flex;
+      align-items: center;
+      height: 1.6em;
+      line-height: 1.6;
+      overflow: hidden;
+      vertical-align: top;
+    }
+    .digit-roller-track {
+      display: flex;
+      flex-direction: column;
+      will-change: transform;
+    }
+    .digit-roller-track > span {
+      display: block;
+      height: 1.6em;
+      line-height: 1.6;
+    }
+    /* 数字与“次上传”的层级对照 */
+    .upload-count {
+      flex: none;
+      display: inline-flex;
+      height: 33.6px;
+      line-height: 33.6px;
+      font-size: 24px;
+      font-weight: 600;
+      color: #FFFFFF;
+      white-space: nowrap;
+    }
+    .upload-count .digit-roller-track {
+      height: 33.6px;
+    }
+    .upload-count-track > span {
+      display: block;
+      min-width: 1ch;
+      text-align: center;
+      height: 33.6px;
+      line-height: 33.6px;
+      font-size: 24px;
+      font-weight: 600;
+      color: #FFFFFF;
+    }
+    .upload-count-unit {
+      flex: none;
+      font-size: 14px;
+      color: #98989D;
+      white-space: nowrap;
+    }
+    @media (max-width: 640px) {
+      .privacy-cell {
+        flex: 1 1 100%;
+        padding: 12px;
+      }
+    }
+    /* 入场：从下方 20px 处错峰浮现，只播一次 */
+    .reveal {
+      opacity: 0;
+      animation: riseIn 0.72s ease-out both;
+      will-change: transform, opacity;
+    }
+    .reveal-1 { animation-delay: 0.04s; }
+    .reveal-2 { animation-delay: 0.16s; }
+    .reveal-4 { animation-delay: 0.34s; }
+    @keyframes riseIn {
+      from { opacity: 0; transform: translate3d(0, 20px, 0); }
+      to { opacity: 1; transform: translate3d(0, 0, 0); }
+    }
+    /* 滚动入场：父级负责淡入上浮，子级继续由 riseIn 错峰浮现，互不覆盖 */
+    .scroll-reveal {
+      opacity: 0;
+      transform: translateY(40px);
+      will-change: transform, opacity;
+    }
+    .scroll-reveal.show {
+      opacity: 1;
+      transform: translateY(0);
+      transition: all 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    /* 全局小字行高：避免行与行贴在一起 */
+    p, li, span, label, small {
+      line-height: 1.6;
+    }
+    /* 弱化的统一分割线：极细、低对比 */
+    .topbar-glass,
+    .sidebar-glass,
+    .mac-card,
+    .mac-card-hover {
+      border-color: rgba(255, 255, 255, 0.06);
+    }
+    .hairline {
+      height: 1px;
+      background: rgba(255, 255, 255, 0.06);
+    }
+    .hairline-v {
+      width: 1px;
+      background: rgba(255, 255, 255, 0.06);
+    }
+    .hairline-b {
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    }
+    .hairline-t {
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
+    }
+    .soft-focus:focus-visible {
+      outline: none;
+      box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.4);
+    }
+    .kbd {
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      background: #2C2C2E;
+      border-radius: 6px;
+      box-shadow: none;
+    }
+    ::selection {
+      background: rgba(10, 132, 255, 0.3);
+      color: #FFFFFF;
+    }
+    .icon-soft {
+      color: #98989D;
+      transition: color 0.2s ease;
+    }
+    .group:hover .icon-soft,
+    button:hover .icon-soft,
+    a:hover .icon-soft,
+    .icon-soft:hover {
+      color: #FFFFFF;
+    }
+    .icon-accent {
+      color: #0A84FF;
+      transition: color 0.2s ease;
+    }
+    .group:hover .icon-accent,
+    button:hover .icon-accent,
+    a:hover .icon-accent,
+    .icon-accent:hover {
+      color: #FFFFFF;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        transition-duration: 1ms !important;
+        animation-duration: 1ms !important;
+      }
+      .aurora-blob,
+      .hero-drop,
+      .drop-card.is-dragover .drop-icon,
+      .hero-drop.is-dragover .drop-icon {
+        animation: none !important;
+      }
+      .pill-primary::before,
+      .drop-card:hover .drop-icon iconify-icon,
+      .drop-card:hover .drop-icon svg,
+      .digit-roller-track {
+        animation: none !important;
+        transition: none !important;
+      }
+      .spotlight-card::before {
+        display: none !important;
+      }
+      .reveal {
+        opacity: 1 !important;
+        transform: none !important;
+        animation: none !important;
+      }
+      .scroll-reveal {
+        opacity: 1 !important;
+        transform: none !important;
+        transition: none !important;
+      }
+    }
+  </style>
+</head>
+<body class="h-screen w-full overflow-hidden bg-black text-[#F5F5F7] antialiased">
+<div aria-hidden="true" class="aurora-layer">
+<span class="aurora-blob aurora-blue"></span>
+<span class="aurora-blob aurora-purple"></span>
+</div>
+<div class="page-surface relative z-10 flex h-full w-full flex-col">
+<header class="topbar-glass hairline-b z-20 flex h-[68px] shrink-0 items-center justify-between gap-5 border-b border-white/[0.06] px-6 lg:px-10">
+<a aria-label="LiteOffice 首页" class="group flex min-w-0 items-center gap-3.5" href="index.html">
+<span class="logo-mark grid h-9 w-9 shrink-0 place-items-center text-[17px] leading-none transition-transform duration-300 ease-out group-hover:scale-[1.04]">LO</span>
+<span class="flex min-w-0 items-baseline gap-3">
+<span class="shrink-0 text-[16px] font-semibold not-italic tracking-[-0.022em] text-[#F5F5F7]">LiteOffice</span>
+<span class="hidden truncate text-[12px] text-[#98989D] sm:inline">文件不上传 · 浏览器内编辑</span>
+</span>
+</a>
+<div class="flex shrink-0 items-center gap-2.5">
+<button class="pill pill-primary soft-focus flex h-9 items-center gap-2 px-4 text-[13px] font-medium" onclick="openFilePicker()" type="button">
+<iconify-icon aria-hidden="true" class="icon-soft text-[17px]" icon="solar:folder-open-linear"></iconify-icon>
+          打开文件
+        </button>
+<button class="pill pill-disabled flex h-9 items-center px-4 text-[13px] font-medium" disabled="" id="saveBtn" type="button">保存下载</button>
+<span class="hidden h-9 items-center gap-2 rounded-full border border-white/[0.06] bg-[#2C2C2E] px-3.5 text-[12px] text-[#98989D] xl:flex" id="statusPill">
+<span class="h-1.5 w-1.5 shrink-0 rounded-full bg-white/25 transition-colors duration-300" id="statusDot"></span>
+<span class="max-w-[190px] truncate" id="statusText">还没有打开文件</span>
+</span>
+</div>
+</header>
+<div class="flex min-h-0 flex-1 overflow-hidden">
+<aside class="sidebar-glass hidden w-[264px] shrink-0 flex-col border-r border-white/[0.06] md:flex xl:w-[292px]">
+<!-- 顶部：全局导航项 -->
+<nav aria-label="全局导航" class="shrink-0 px-4 pt-6">
+<p class="px-3 pb-2.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[#7C7C81]">导航</p>
+<div class="flex flex-col gap-0.5">
+<button aria-current="page" aria-label="本地文档（当前）" class="nav-item is-active" type="button">
+<iconify-icon aria-hidden="true" icon="solar:folder-with-files-linear"></iconify-icon>
+<span class="truncate">本地文档</span>
+<span class="ml-auto shrink-0 rounded-full bg-white/[0.06] px-2 text-[11px] font-medium leading-[18px] text-[#98989D] transition-colors duration-300" id="fileCount">0</span>
+</button>
+<button aria-disabled="true" aria-label="AI 助手（预留功能，暂未开放）" class="nav-item is-planned" title="即将推出" type="button">
+<iconify-icon aria-hidden="true" icon="solar:magic-stick-3-linear"></iconify-icon>
+<span class="truncate">AI 助手</span>
+<span class="nav-badge">预留</span>
+</button>
+<button aria-disabled="true" aria-label="云端工作区（预留功能，暂未开放）" class="nav-item is-planned" onclick="showCloudWorkspaceToast()" title="即将推出" type="button">
+<iconify-icon aria-hidden="true" icon="solar:cloud-linear"></iconify-icon>
+<span class="truncate">云端工作区</span>
+<span class="nav-badge">预留</span>
+</button>
+</div>
+</nav>
+<div class="hairline mx-7 mt-4 shrink-0 xl:mx-8" role="separator"></div>
+<!-- 中部：会话内容区，始终保留文件列表容器 -->
+<div class="flex min-h-0 flex-1 flex-col">
+<p class="shrink-0 px-7 pb-2 pt-4 xl:px-8">
+<span class="session-label" id="sessionStatus">当前会话：暂无文件</span>
+</p>
+<div class="no-scrollbar min-h-0 flex-1 overflow-y-auto pb-2">
+<ul class="hidden" id="fileList"></ul>
+</div>
+</div>
+<!-- 底部：本地安全提示 -->
+<div class="hairline-t shrink-0 px-7 pb-7 pt-5 xl:px-8 xl:pb-8">
+<div class="flex items-center gap-2 text-[12px] font-medium text-[#98989D]">
+<iconify-icon aria-hidden="true" class="text-[16px]" icon="solar:lock-keyhole-minimalistic-linear"></iconify-icon>
+<span class="truncate">仅在本地处理 · 所有处理都在本机浏览器完成</span>
+</div>
+<a class="soft-focus group mt-4 flex w-fit items-center gap-1.5 text-[12px] font-medium leading-[1.6] text-[#0A84FF] transition-colors duration-300 hover:text-white" href="editor.html">
+            打开编辑页
+            <iconify-icon aria-hidden="true" class="icon-accent text-[14px]" icon="solar:arrow-up-right-linear"></iconify-icon>
+</a>
+</div>
+</aside>
+<div class="relative flex min-w-0 flex-1 flex-col">
+<main class="app-scroll min-w-0 flex-1 bg-transparent" id="homeScroll">
+<div class="app-scroll-inner mx-auto flex min-h-full w-full max-w-[1180px] flex-col px-6 py-10 sm:px-10 lg:px-14 lg:py-14">
+<div class="flex min-h-0 flex-1 flex-col" id="emptyView">
+<!-- 主卡片：替代原深蓝 Banner -->
+<section class="mac-card spotlight-card scroll-reveal relative overflow-hidden px-7 py-8 sm:px-9 sm:py-9" id="heroCard">
+<div class="reveal reveal-1">
+<div class="relative z-10 grid gap-7 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] lg:items-stretch lg:gap-9">
+<div class="flex flex-col self-stretch">
+<div class="flex flex-wrap items-center justify-between gap-4">
+<span class="inline-flex h-7 items-center text-[12px] leading-[1.6] text-[#98989D]">
+                      本地打开 · 无需登录
+                    </span>
+<span class="hidden items-center gap-2 text-[12px] leading-[1.6] text-[#98989D] sm:flex">
+<iconify-icon aria-hidden="true" class="text-[15px]" icon="solar:lock-keyhole-minimalistic-linear"></iconify-icon>
+                      文件不离开你的电脑
+                    </span>
+</div>
+<h1 class="mt-7 text-[40px] font-semibold leading-[1.05] tracking-[-0.02em] text-[#F5F5F7]">
+                    打开一个文档
+                  </h1>
+<p class="mt-3 max-w-[400px] text-[16px] leading-[1.6] text-[#98989D]">
+                    拖进窗口，或点上方「打开文件」。<br class="hidden sm:block"/>
+                    不需要登录，也不会上传。
+                  </p>
+<div class="mt-6">
+<button class="pill pill-primary soft-focus group flex h-12 items-center gap-3 pl-6 pr-5 text-[14px] font-medium" onclick="openFilePicker()" type="button">
+                      打开文件
+                      <iconify-icon aria-hidden="true" class="icon-soft text-[17px] transition-transform duration-300 ease-out group-hover:translate-x-1" icon="solar:arrow-right-linear"></iconify-icon>
+</button>
+<div aria-label="支持的文件格式：docx、xlsx、pptx、md、pdf" class="mt-4 flex flex-wrap items-center gap-1.5" role="list">
+<span class="format-chip" role="listitem">docx</span>
+<span class="format-chip" role="listitem">xlsx</span>
+<span class="format-chip" role="listitem">pptx</span>
+<span class="format-chip" role="listitem">md</span>
+<span class="format-chip" role="listitem">pdf</span>
+</div>
+</div>
+</div>
+<div class="drop-card hero-drop soft-focus group cursor-pointer lg:self-stretch" id="heroDrop" onclick="openFilePicker()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openFilePicker();}" role="button" tabindex="0">
+<span class="drop-icon">
+<iconify-icon aria-hidden="true" class="text-[20px]" icon="solar:upload-minimalistic-linear"></iconify-icon>
+</span>
+<span class="text-[14px] font-medium leading-[1.5] text-[#C7C7CC] transition-colors duration-300 group-hover:text-[#F5F5F7]" id="heroDropText">或拖入文件</span>
+<span class="text-[12px] leading-[1.6] text-[#A1A1A6]">松开即打开 · 不上传</span>
+</div>
+</div>
+</div>
+</section>
+<div class="scroll-reveal mt-6">
+<div class="mac-card privacy-card reveal reveal-2 flex flex-col p-6">
+<div class="flex items-center justify-between gap-3">
+<p class="text-[13px] font-medium leading-[1.6] text-[#F5F5F7]">隐私与安全</p>
+<span class="grid h-6 w-6 place-items-center rounded-[7px] bg-white/[0.06] text-[#98989D]">
+<iconify-icon aria-hidden="true" class="text-[14px]" icon="solar:shield-check-linear"></iconify-icon>
+</span>
+</div>
+<div class="privacy-grid mt-4">
+<div class="privacy-cell">
+<span class="privacy-icon">
+<iconify-icon aria-hidden="true" class="text-[15px]" icon="solar:laptop-linear"></iconify-icon>
+</span>
+<div class="min-w-0">
+<p class="text-[13px] font-semibold leading-[1.4] text-[#F5F5F7]">本地处理</p>
+<p class="mt-1 text-[11px] leading-[1.5] text-[#98989D]">读取编辑都在本机</p>
+</div>
+</div>
+<div class="privacy-cell">
+<span class="privacy-icon">
+<iconify-icon aria-hidden="true" class="text-[15px]" icon="solar:cloud-cross-linear"></iconify-icon>
+</span>
+<div class="min-w-0">
+<p aria-label="0 次上传" class="flex items-end gap-1.5 whitespace-nowrap">
+<span aria-hidden="true" class="digit-roller upload-count" data-target="0" id="uploadCount"><span class="digit-roller-track upload-count-track"><span>0</span><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span><span>0</span></span></span>
+<span class="upload-count-unit">次上传</span>
+</p>
+</div>
+</div>
+<div class="privacy-cell">
+<span class="privacy-icon">
+<iconify-icon aria-hidden="true" class="text-[15px]" icon="solar:eye-closed-linear"></iconify-icon>
+</span>
+<div class="min-w-0">
+<p class="text-[13px] font-semibold leading-[1.4] text-[#F5F5F7]">无广告追踪</p>
+<p class="mt-1 text-[11px] leading-[1.5] text-[#98989D]">没有统计脚本</p>
+</div>
+</div>
+<div class="privacy-cell">
+<span class="privacy-icon">
+<iconify-icon aria-hidden="true" class="text-[15px]" icon="solar:bolt-linear"></iconify-icon>
+</span>
+<div class="min-w-0">
+<p class="text-[13px] font-semibold leading-[1.4] text-[#F5F5F7]">极速响应</p>
+<p class="mt-1 text-[11px] leading-[1.5] text-[#98989D]">打开即用，无需等待</p>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div class="flex shrink-0 flex-wrap items-center justify-between gap-3 pt-8 text-[12px] leading-[1.6] text-[#98989D]">
+<span>docx · xlsx · pptx · md · pdf / 文件不离开你的电脑</span>
+<span class="flex items-center gap-1.5">
+<kbd class="kbd px-1.5 py-0.5 text-[10px] text-[#98989D]">⌘</kbd>
+<span class="text-[#98989D]">/</span>
+<kbd class="kbd px-1.5 py-0.5 text-[10px] text-[#98989D]">Ctrl</kbd>
+<span class="text-[#98989D]">+</span>
+<kbd class="kbd px-1.5 py-0.5 text-[10px] text-[#98989D]">O</kbd>
+<span class="ml-1">快速打开</span>
+</span>
+</div>
+</div>
+<div class="hidden min-h-0 flex-1 flex-col gap-6" id="loadedView">
+<div class="grid flex-1 gap-6 lg:grid-cols-12">
+<section class="mac-card relative overflow-hidden px-8 py-10 sm:px-12 sm:py-12 lg:col-span-8">
+<div class="relative z-10 flex flex-wrap items-center justify-between gap-3">
+<span class="inline-flex h-7 items-center gap-2 rounded-full bg-[#0A84FF]/[0.14] px-3 text-[12px] font-medium text-[#0A84FF]">
+<span class="h-1.5 w-1.5 rounded-full bg-[#0A84FF]"></span>
+                    文件已就绪
+                  </span>
+<button class="pill pill-secondary soft-focus group flex h-8 items-center gap-1.5 px-3.5 text-[12px] font-medium text-[#98989D]" id="clearBtn" type="button">
+<iconify-icon aria-hidden="true" class="icon-soft text-[14px]" icon="solar:trash-bin-trash-linear"></iconify-icon>
+                    清空会话
+                  </button>
+</div>
+<div class="relative z-10 mt-10">
+<div class="flex items-start gap-6">
+<span class="grid h-[84px] w-[68px] shrink-0 place-items-center rounded-[16px] border border-white/[0.06] bg-white/[0.05] text-[12px] font-semibold tracking-[0.04em] text-[#98989D]" id="loadedExt">DOCX</span>
+<div class="min-w-0">
+<p class="text-[12px] text-[#98989D]" id="loadedKind">Word 文档</p>
+<h1 class="mt-2 break-words text-[30px] font-semibold leading-[1.15] tracking-[-0.032em] text-[#F5F5F7] sm:text-[38px] lg:text-[42px]" id="loadedName">document.docx</h1>
+<p class="mt-3 text-[12px] text-[#98989D]" id="loadedMeta">0 KB · 仅保存在本机</p>
+</div>
+</div>
+<p class="mt-8 max-w-[500px] text-[14px] leading-[1.75] text-[#98989D]">文件已经在本地就绪。你可以直接下载，或进入编辑器继续处理。所有内容都不会被上传。</p>
+</div>
+<div class="relative z-10 mt-10 flex flex-wrap items-center gap-3">
+<a class="pill pill-primary soft-focus group flex h-11 items-center gap-3 pl-6 pr-5 text-[13px] font-medium" href="editor.html" id="openInEditorBtn" onclick="event.preventDefault(); openEditor(state.activeId)">
+                    在编辑器中继续
+                    <iconify-icon aria-hidden="true" class="icon-soft text-[16px] transition-transform duration-300 ease-out group-hover:translate-x-1" icon="solar:arrow-right-linear"></iconify-icon>
+</a>
+<button class="pill pill-secondary soft-focus flex h-11 items-center gap-2 px-5 text-[13px] font-medium" id="downloadBtn" type="button">
+<iconify-icon aria-hidden="true" class="icon-soft text-[17px]" icon="solar:download-minimalistic-linear"></iconify-icon>
+                    保存下载
+                  </button>
+<button class="soft-focus flex h-11 items-center rounded-full px-2 text-[13px] font-medium text-[#98989D] transition-colors duration-300 hover:text-white" onclick="openFilePicker()" type="button">
+                    再打开一个文件
+                  </button>
+</div>
+<div aria-live="polite" class="real-doc relative z-10 mt-8" id="realDoc"></div>
+</section>
+<div class="grid gap-6 lg:col-span-4 lg:grid-rows-2">
+<div class="mac-card flex min-h-[230px] flex-col justify-between p-8">
+<span class="grid h-11 w-11 place-items-center rounded-[12px] bg-white/[0.06] text-[#98989D]">
+<iconify-icon aria-hidden="true" class="icon-soft text-[20px]" icon="solar:lock-keyhole-minimalistic-linear"></iconify-icon>
+</span>
+<div>
+<p class="text-[22px] font-semibold leading-[1.25] tracking-[-0.028em] text-[#F5F5F7]">文件仍在<br/><span class="text-[#98989D]">你的电脑里</span></p>
+<p class="mt-3 text-[12px] leading-5 text-[#98989D]">关闭页面后，会话记录会自动清除。</p>
+</div>
+</div>
+<div class="mac-card flex min-h-[230px] flex-col justify-between p-8">
+<span class="grid h-11 w-11 place-items-center rounded-[12px] bg-[#0A84FF]/[0.12] text-[#0A84FF]">
+<iconify-icon aria-hidden="true" class="icon-accent text-[20px]" icon="solar:document-text-linear"></iconify-icon>
+</span>
+<div>
+<p class="text-[22px] font-semibold leading-[1.25] tracking-[-0.028em] text-[#F5F5F7]">继续排版，<br/>或保存带走。</p>
+<button class="pill pill-secondary soft-focus mt-5 flex h-9 items-center gap-1.5 px-4 text-[12px] font-medium" id="downloadBtn2" type="button">
+                      下载当前文件
+                      <iconify-icon aria-hidden="true" class="icon-soft text-[14px]" icon="solar:arrow-up-right-linear"></iconify-icon>
+</button>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</main>
+<div aria-hidden="true" class="scroll-rail" id="scrollRail"><span class="scroll-rail-thumb"></span></div>
+</div>
+</div>
+</div>
+<input accept=".docx,.xlsx,.pptx,.md,.pdf" class="hidden" id="fileInput" multiple="" type="file"/>
+<div aria-live="polite" class="pointer-events-none fixed bottom-6 right-6 z-50 max-w-[360px] translate-y-2 rounded-full border border-white/[0.06] bg-[#2C2C2E] px-5 py-3 text-[12px] font-medium text-[#F5F5F7] opacity-0 backdrop-blur-xl transition-all duration-300" id="toast" role="status"></div>
+<script>
+    const ALLOWED_EXTENSIONS = ["docx", "xlsx", "pptx", "md", "pdf"];
+    const FILE_KINDS = {
+      docx: "Word 文档",
+      xlsx: "Excel 表格",
+      pptx: "PowerPoint 演示",
+      md: "Markdown 文本",
+      pdf: "PDF 文档"
+    };
+
+    const TOAST_BASE = "pointer-events-none fixed bottom-6 right-6 z-50 max-w-[360px] rounded-full border border-white/[0.06] bg-[#2C2C2E] px-5 py-3 text-[12px] font-medium backdrop-blur-xl transition-all duration-300";
+    const TOAST_HIDDEN = TOAST_BASE + " translate-y-2 text-[#F5F5F7] opacity-0";
+    const TOAST_VISIBLE = TOAST_BASE + " translate-y-0 text-[#F5F5F7] opacity-100";
+    const TOAST_ERROR = TOAST_BASE + " translate-y-0 text-[#98989D] opacity-100";
+
+    const state = {
+      files: [],
+      activeId: null,
+      sequence: 0
+    };
+
+    /* ---------- 真实文件链路：本地读取 → 浏览器端解析 → 暂存给编辑页 ---------- */
+    const ReadReal = (function () {
+      const MAX_FILE_BYTES = 40 * 1024 * 1024;
+      const MAX_SHEET_CELLS = 8000;
+      const MAX_TABLE_ROWS = 800;
+      const SESSION_DB = "liteoffice-local";
+      const SESSION_STORE = "session";
+      const SESSION_KEY = "current";
+      const UNAVAILABLE = "解析库加载失败，暂时无法预览这个文件。可以继续保存下载原始文件，或检查网络后刷新重试。";
+
+      function mimeFor(ext) {
+        const map = {
+          docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+          md: "text/markdown;charset=utf-8",
+          pdf: "application/pdf"
+        };
+        return map[ext] || "application/octet-stream";
+      }
+
+      function hasBytes(bytes, signature) {
+        if (!bytes || bytes.length < signature.length) return false;
+        for (let i = 0; i < signature.length; i += 1) {
+          if (bytes[i] !== signature[i]) return false;
+        }
+        return true;
+      }
+
+      function readBytes(file) {
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(new Uint8Array(reader.result));
+          reader.onerror = () => reject(new Error("无法读取「" + file.name + "」，文件可能已被移动或没有读取权限。"));
+          reader.readAsArrayBuffer(file);
+        });
+      }
+
+      function inflate(bytes) {
+        if (typeof DecompressionStream === "undefined") {
+          throw new Error("当前浏览器不支持解压 Office 文件，请使用最新版 Chrome、Edge 或 Safari。");
+        }
+        const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+        return new Response(stream).arrayBuffer().then((buffer) => new Uint8Array(buffer));
+      }
+
+      function decodeText(bytes) {
+        try {
+          return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+        } catch (error) {
+          try {
+            return new TextDecoder("gb18030").decode(bytes);
+          } catch (fallbackError) {
+            return new TextDecoder("utf-8").decode(bytes);
+          }
+        }
+      }
+
+      async function validateFile(file) {
+        const ext = getExtension(file.name);
+        if (file.size === 0) {
+          throw new Error("「" + file.name + "」是一个空文件，没有可展示的内容。");
+        }
+        if (file.size > MAX_FILE_BYTES) {
+          throw new Error("「" + file.name + "」超过 40 MB，暂不在浏览器内预览，以免页面卡顿。");
+        }
+        const bytes = await readBytes(file);
+        if (ext === "pdf" && !hasBytes(bytes, [0x25, 0x50, 0x44, 0x46])) {
+          throw new Error("「" + file.name + "」不是有效的 PDF 文件，可能已损坏。");
+        }
+        if (["docx", "xlsx", "pptx"].includes(ext) && !hasBytes(bytes, [0x50, 0x4b])) {
+          throw new Error("「" + file.name + "」不是有效的 " + ext.toUpperCase() + " 文件（缺少压缩包结构），可能已损坏。");
+        }
+        return bytes;
+      }
+
+      function storeNames(bytes) {
+        const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+        const decoder = new TextDecoder("utf-8");
+        let eocd = -1;
+        for (let i = bytes.length - 22; i >= Math.max(0, bytes.length - 66560); i -= 1) {
+          if (view.getUint32(i, true) === 0x06054b50) {
+            eocd = i;
+            break;
+          }
+        }
+        if (eocd < 0) throw new Error("压缩包目录缺失，无法读取文件结构。");
+        const total = view.getUint16(eocd + 10, true);
+        let offset = view.getUint32(eocd + 16, true);
+        const names = [];
+        for (let i = 0; i < total; i += 1) {
+          if (offset + 46 > bytes.length || view.getUint32(offset, true) !== 0x02014b50) break;
+          const nameLength = view.getUint16(offset + 28, true);
+          const extraLength = view.getUint16(offset + 30, true);
+          const commentLength = view.getUint16(offset + 32, true);
+          names.push(decoder.decode(bytes.subarray(offset + 46, offset + 46 + nameLength)));
+          offset += 46 + nameLength + extraLength + commentLength;
+        }
+        return names;
+      }
+
+      function locateEntry(bytes, name) {
+        const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+        const decoder = new TextDecoder("utf-8");
+        const nameBytes = new TextEncoder().encode(name);
+        for (let i = bytes.length - 22; i >= Math.max(0, bytes.length - 66560); i -= 1) {
+          if (view.getUint32(i, true) !== 0x06054b50) continue;
+          const total = view.getUint16(i + 10, true);
+          let offset = view.getUint32(i + 16, true);
+          for (let n = 0; n < total; n += 1) {
+            if (offset + 46 > bytes.length || view.getUint32(offset, true) !== 0x02014b50) return null;
+            const nameLength = view.getUint16(offset + 28, true);
+            const extraLength = view.getUint16(offset + 30, true);
+            const commentLength = view.getUint16(offset + 32, true);
+            const current = bytes.subarray(offset + 46, offset + 46 + nameLength);
+            if (decoder.decode(current) === name) {
+              const method = view.getUint16(offset + 10, true);
+              const compressedSize = view.getUint32(offset + 20, true);
+              const localOffset = view.getUint32(offset + 42, true);
+              if (localOffset + 30 > bytes.length || view.getUint32(localOffset, true) !== 0x04034b50) return null;
+              const localName = view.getUint16(localOffset + 26, true);
+              const localExtra = view.getUint16(localOffset + 28, true);
+              const dataStart = localOffset + 30 + localName + localExtra;
+              const dataSize = view.getUint32(localOffset + 18, true) || compressedSize;
+              const raw = bytes.subarray(dataStart, Math.min(bytes.length, dataStart + dataSize));
+              return { raw: raw, method: method };
+            }
+            offset += 46 + nameLength + extraLength + commentLength;
+          }
+          return null;
+        }
+        return null;
+      }
+
+      const entryCache = new WeakMap();
+
+      async function extractEntry(bytes, name) {
+        const cache = entryCache.get(bytes) || new Map();
+        entryCache.set(bytes, cache);
+        if (cache.has(name)) return cache.get(name);
+        const entry = locateEntry(bytes, name);
+        if (!entry) return null;
+        let result;
+        if (entry.method === 0) {
+          result = entry.raw;
+        } else if (entry.method === 8) {
+          result = await inflate(entry.raw);
+        } else {
+          throw new Error("不支持该 Office 文件使用的压缩方式。");
+        }
+        cache.set(name, result);
+        return result;
+      }
+
+      async function extractText(bytes, name) {
+        const data = await extractEntry(bytes, name);
+        return data ? decodeText(data) : null;
+      }
+
+      async function extractXml(bytes, name) {
+        const text = await extractText(bytes, name);
+        if (!text) return null;
+        const xml = new DOMParser().parseFromString(text, "application/xml");
+        if (xml.querySelector("parsererror")) {
+          throw new Error("文件内部 XML 结构损坏，无法解析。");
+        }
+        return xml;
+      }
+
+      function textOf(element) {
+        return element ? element.textContent : "";
+      }
+
+      function byLocalName(root, tag) {
+        return Array.prototype.slice.call(root.getElementsByTagName("*")).filter((node) => node.localName === tag);
+      }
+
+      /* XML/DOM 节点的 children 不保证是数组（可能为 undefined、null、单节点或类数组），统一归一化后再遍历 */
+      function toArray(value) {
+        if (value == null) return [];
+        if (Array.isArray(value)) return value;
+        if (typeof value === "string" || typeof value === "number") return [];
+        if (typeof value.length === "number") {
+          try {
+            return Array.prototype.slice.call(value);
+          } catch (error) {
+            return [];
+          }
+        }
+        if (typeof value === "object" && typeof value.localName === "string") return [value];
+        return [];
+      }
+
+      function docxChildren(node) {
+        return node && typeof node === "object" ? toArray(node.children) : [];
+      }
+
+      function docxElements(node, tag) {
+        return docxChildren(node).filter((child) => child && child.localName === tag);
+      }
+
+      function escapeHtml(value) {
+        return String(value == null ? "" : value)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+      }
+
+      function safeHref(url) {
+        const value = String(url || "").trim();
+        if (/^(https?:|mailto:|#|\/(?!\/))/i.test(value)) return escapeHtml(value);
+        return "#";
+      }
+
+      /* ---- Markdown：按标题、列表、代码块、引用、表格与分行逐行排版 ---- */
+      function inlineMd(text) {
+        const codes = [];
+        let output = String(text).replace(/`([^`]+)`/g, (match, code) => {
+          codes.push(code);
+          return "\u0000code" + (codes.length - 1) + "\u0000";
+        });
+        output = escapeHtml(output);
+        output = output.replace(/!\[([^\]]*)\]\(([^)\s]+)[^)]*\)/g, (m, alt, src) => {
+          return '<a href="' + safeHref(src) + '" target="_blank" rel="noreferrer">[图片] ' + (alt || "未命名图片") + "</a>";
+        });
+        output = output.replace(/\[([^\]]+)\]\(([^)\s]+)[^)]*\)/g, (m, label, href) => {
+          return '<a href="' + safeHref(href) + '" target="_blank" rel="noreferrer">' + label + "</a>";
+        });
+        output = output.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+        output = output.replace(/__([^_]+)__/g, "<strong>$1</strong>");
+        output = output.replace(/(^|[^*])\*([^*\s][^*]*)\*/g, "$1<em>$2</em>");
+        output = output.replace(/~~([^~]+)~~/g, "<del>$1</del>");
+        output = output.replace(/\u0000code(\d+)\u0000/g, (m, index) => "<code>" + escapeHtml(codes[Number(index)]) + "</code>");
+        return output;
+      }
+
+      function splitTableRow(line) {
+        return line.replace(/^\s*\|/, "").replace(/\|\s*$/, "").split("|").map((cell) => cell.trim());
+      }
+
+      function renderMarkdown(source) {
+        const lines = String(source).replace(/\r\n?/g, "\n").replace(/\t/g, "    ").split("\n");
+        const html = [];
+        let paragraph = [];
+        let listType = null;
+
+        function flushParagraph() {
+          if (!paragraph.length) return;
+          html.push("<p>" + paragraph.map((line) => inlineMd(line)).join("<br />") + "</p>");
+          paragraph = [];
+        }
+
+        function closeList() {
+          if (!listType) return;
+          html.push("</" + listType + ">");
+          listType = null;
+        }
+
+        for (let i = 0; i < lines.length; i += 1) {
+          const line = lines[i];
+          if (/^\s*```/.test(line)) {
+            flushParagraph();
+            closeList();
+            const fence = line.trim().replace(/^```/, "").trim();
+            const buffer = [];
+            i += 1;
+            while (i < lines.length && !/^\s*```/.test(lines[i])) {
+              buffer.push(lines[i]);
+              i += 1;
+            }
+            html.push('<pre data-lang="' + escapeHtml(fence) + '"><code>' + escapeHtml(buffer.join("\n")) + "</code></pre>");
+            continue;
+          }
+          if (!line.trim()) {
+            flushParagraph();
+            closeList();
+            continue;
+          }
+          const heading = /^(#{1,6})\s+(.*)$/.exec(line);
+          if (heading) {
+            flushParagraph();
+            closeList();
+            const level = heading[1].length;
+            html.push("<h" + level + ">" + inlineMd(heading[2].replace(/\s+#+\s*$/, "")) + "</h" + level + ">");
+            continue;
+          }
+          if (/^\s*([-*_])\s*(\1\s*){2,}$/.test(line)) {
+            flushParagraph();
+            closeList();
+            html.push("<hr />");
+            continue;
+          }
+          if (/^\s*>/.test(line)) {
+            flushParagraph();
+            closeList();
+            const buffer = [];
+            while (i < lines.length && /^\s*>/.test(lines[i])) {
+              buffer.push(lines[i].replace(/^\s*>\s?/, ""));
+              i += 1;
+            }
+            i -= 1;
+            html.push("<blockquote>" + buffer.map((item) => inlineMd(item)).join("<br />") + "</blockquote>");
+            continue;
+          }
+          if (/^\s*\|.*\|\s*$/.test(line) && i + 1 < lines.length && /^\s*\|?[\s:|-]+\|[\s:|-]*$/.test(lines[i + 1])) {
+            flushParagraph();
+            closeList();
+            const headers = splitTableRow(line);
+            const rows = [];
+            i += 2;
+            while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) {
+              rows.push(splitTableRow(lines[i]));
+              i += 1;
+            }
+            i -= 1;
+            let table = "<table><thead><tr>" + headers.map((cell) => "<th>" + inlineMd(cell) + "</th>").join("") + "</tr></thead><tbody>";
+            rows.forEach((row) => {
+              table += "<tr>" + headers.map((cell, index) => "<td>" + inlineMd(row[index] || "") + "</td>").join("") + "</tr>";
+            });
+            html.push(table + "</tbody></table>");
+            continue;
+          }
+          const listItem = /^(\s*)([-*+]|\d+[.)])\s+(.*)$/.exec(line);
+          if (listItem) {
+            flushParagraph();
+            var type = /\d/.test(listItem[2]) ? "ol" : "ul";
+            if (listType !== type) {
+              closeList();
+              html.push("<" + type + ">");
+              listType = type;
+            }
+            html.push("<li>" + inlineMd(listItem[3]) + "</li>");
+            continue;
+          }
+          paragraph.push(line);
+        }
+        flushParagraph();
+        closeList();
+        return html.length ? html.join("") : '<p class="doc-empty">这个 Markdown 文件是空白的。</p>';
+      }
+
+      /* ---- DOCX：解析 word/document.xml 的段落、标题层级、列表与表格 ---- */
+      function buildWrappedView(block) {
+        const children = docxChildren(block);
+        if (!children.length) return "";
+        return '<div class="doc-page">' + children.map((child) => runToHtml(child)).join("") + "</div>";
+      }
+
+      function runToHtml(run, overrides) {
+        const style = Object.assign({}, overrides || {});
+        const cs = byLocalName(run, "rStyle")[0];
+        const styleName = cs ? cs.getAttribute("w:val") : "";
+        if (/Strong|Bold|标题|Heading/i.test(styleName) && /Strong|Bold/i.test(styleName)) style.bold = true;
+        const manual = byLocalName(run, "b")[0];
+        if (manual && manual.getAttribute("w:val") !== "0" && manual.getAttribute("w:val") !== "false") style.bold = true;
+        if (byLocalName(run, "i").length) style.italic = true;
+        if (byLocalName(run, "u").length) style.underline = true;
+        if (byLocalName(run, "del").length) style.strike = true;
+        const color = byLocalName(run, "color")[0];
+        if (color && /^[0-9A-Fa-f]{6}$/.test(color.getAttribute("w:val") || "")) style.color = "#" + color.getAttribute("w:val");
+        const size = byLocalName(run, "sz")[0];
+        if (size && Number(size.getAttribute("w:val"))) style.size = Math.min(40, Math.max(9, Number(size.getAttribute("w:val")) / 2)) + "px";
+        const decor = [];
+        if (style.bold) decor.push("font-weight:600");
+        if (style.italic) decor.push("font-style:italic");
+        if (style.underline) decor.push("text-decoration:underline");
+        if (style.strike) decor.push("text-decoration:line-through");
+        if (style.color) decor.push("color:" + style.color);
+        if (style.size) decor.push("font-size:" + style.size);
+        const open = decor.length ? "<span style=\"" + decor.join(";") + "\">" : "";
+        const close = decor.length ? "</span>" : "";
+        if (!run || typeof run !== "object") return "";
+        const flatten = (node, depth, acc) => {
+          if (!node || typeof node !== "object" || depth > 6) return acc;
+          docxChildren(node).forEach((child) => {
+            if (!child) return;
+            const name = child.localName;
+            if (name === "t") {
+              const text = child.textContent;
+              if (text) acc.push(escapeHtml(text));
+            } else if (name === "tab") {
+              acc.push("\u00a0\u00a0\u00a0\u00a0");
+            } else if (name === "br" || name === "cr") {
+              acc.push("<br />");
+            } else if (name === "noBreakHyphen") {
+              acc.push("-");
+            } else if (name === "softHyphen") {
+              acc.push("\u00ad");
+            } else if (name === "instrText" || name === "delText" || name === "rPr") {
+              // 域代码与格式属性不是正文，直接跳过
+            } else {
+              // SmartTag、超链接内 run、修订记录等容器节点：继续向下找文字
+              flatten(child, depth + 1, acc);
+            }
+          });
+          return acc;
+        };
+        try {
+          return open + flatten(run, 0, []).join("") + close;
+        } catch (error) {
+          return "";
+        }
+      }
+
+      /* 段落内按文档顺序拼接 run（含超链接、SmartTag 中的 run），避免丢字 */
+      function paragraphToHtml(paragraph) {
+        const walk = (node, depth) => {
+          if (!node || typeof node !== "object" || depth > 6) return "";
+          return docxChildren(node).map((child) => {
+            if (!child) return "";
+            const name = child.localName;
+            if (name === "r") return runToHtml(child);
+            if (name === "hyperlink" || name === "smartTag" || name === "sdt" || name === "sdtContent" || name === "ins" || name === "fldSimple") {
+              return walk(child, depth + 1);
+            }
+            return "";
+          }).join("");
+        };
+        return walk(paragraph, 0);
+      }
+
+      async function parseDocx(bytes, fileName) {
+        const doc = await extractXml(bytes, "word/document.xml");
+        if (!doc) throw new Error("DOCX 缺少主文档内容，可能是损坏或不完整的文件。");
+        const body = byLocalName(doc, "body")[0];
+        const output = [];
+        let numbered = 0;
+        let skippedNodes = 0;
+        const blocks = docxChildren(body).filter((node) => node && (node.localName === "p" || node.localName === "tbl"));
+        blocks.forEach((node) => {
+          let markup = null;
+          try {
+            if (node.localName === "p") {
+              const paraStyle = byLocalName(node, "pStyle")[0];
+              const styleName = paraStyle ? paraStyle.getAttribute("w:val") || "" : "";
+              const listNode = byLocalName(node, "numPr")[0];
+              const heading = /^(?:heading|标题)\s*([1-6])$/i.exec(styleName);
+              const inner = paragraphToHtml(node);
+              if (!inner.trim() && !byLocalName(node, "drawing").length) {
+                markup = "";
+              } else if (heading) {
+                const level = Number(heading[1]);
+                markup = "<h" + level + ">" + inner + "</h" + level + ">";
+              } else if (styleName === "Title" || styleName === "标题") {
+                markup = "<h1>" + inner + "</h1>";
+              } else if (listNode) {
+                const ordered = /ListNumber|列表段落|编号/i.test(styleName) || byLocalName(node, "numFmt").length > 0;
+                if (ordered) {
+                  numbered += 1;
+                  markup = '<p style="padding-left:22px;text-indent:-16px">' + numbered + ". " + inner + "</p>";
+                } else {
+                  numbered = 0;
+                  markup = '<p style="padding-left:22px;text-indent:-16px">• ' + inner + "</p>";
+                }
+              } else {
+                numbered = 0;
+                markup = "<p>" + inner + "</p>";
+              }
+            } else {
+              numbered = 0;
+              const rows = docxElements(node, "tr");
+              let table = "<table><tbody>";
+              rows.forEach((row, rowIndex) => {
+                const cells = docxElements(row, "tc");
+                table += "<tr>";
+                cells.forEach((cell) => {
+                  const paragraphs = [];
+                  const collect = (container, depth) => {
+                    if (!container || depth > 4) return;
+                    docxChildren(container).forEach((child) => {
+                      if (!child) return;
+                      if (child.localName === "p") {
+                        paragraphs.push(paragraphToHtml(child));
+                      } else if (child.localName === "tbl" || child.localName === "sdt" || child.localName === "sdtContent" || child.localName === "tr") {
+                        collect(child, depth + 1);
+                      }
+                    });
+                  };
+                  collect(cell, 0);
+                  const inner = paragraphs.filter((item) => item.trim()).join("<br />");
+                  table += rowIndex === 0 ? "<th>" + inner + "</th>" : "<td>" + inner + "</td>";
+                });
+                table += "</tr>";
+              });
+              markup = rows.length ? table + "</tbody></table>" : "";
+            }
+          } catch (error) {
+            // 单个段落/表格解析失败只跳过它，其余内容照常展示
+            skippedNodes += 1;
+          }
+          if (markup) output.push(markup);
+        });
+        const plain = plainFromDom(output.join(""));
+        const partial = skippedNodes > 0;
+        const charCount = plain.replace(/\s+/g, "").length;
+        return {
+          html: output.length ? output.join("") : '<p class="doc-empty">这个 Word 文档没有可展示的文字内容。</p>',
+          partial: partial,
+          note: partial
+            ? "文档部分内容无法解析，已展示可读部分（已从 " + fileName + " 读取 " + charCount + " 个字符，跳过 " + skippedNodes + " 处结构）。"
+            : "已从 " + fileName + " 中读取 " + charCount + " 个字符的文字内容。",
+          text: plain,
+          pageCount: 1
+        };
+      }
+
+      function plainFromDom(html) {
+        const holder = document.createElement("div");
+        holder.innerHTML = html;
+        return holder.textContent || "";
+      }
+
+      /* ---- XLSX：读取共享字符串与工作表，真实单元格值按工作表切换 ---- */
+      async function parseXlsx(bytes) {
+        const workbook = await extractXml(bytes, "xl/workbook.xml");
+        if (!workbook) throw new Error("XLSX 缺少工作簿结构，可能是损坏的文件。");
+        const rels = await extractXml(bytes, "xl/_rels/workbook.xml.rels");
+        const relMap = {};
+        if (rels) {
+          byLocalName(rels, "Relationship").forEach((rel) => {
+            relMap[rel.getAttribute("Id")] = rel.getAttribute("Target") || "";
+          });
+        }
+        const sharedXml = await extractXml(bytes, "xl/sharedStrings.xml");
+        const shared = sharedXml ? byLocalName(sharedXml, "si").map((si) => textOf(si)) : [];
+        const sheets = byLocalName(workbook, "sheet").map((sheet) => {
+          const relId = sheet.getAttribute("r:id") || "";
+          let target = relMap[relId] || "";
+          if (target && !/^xl\//.test(target)) target = "xl/" + target.replace(/^\.?\//, "");
+          if (!target) target = "xl/worksheets/sheet1.xml";
+          return { name: sheet.getAttribute("name") || "工作表", path: target };
+        });
+        const sheetsData = [];
+        for (const sheet of sheets) {
+          const data = { name: sheet.name, rows: [] };
+          try {
+            const sheetXml = await extractXml(bytes, sheet.path);
+            if (sheetXml) {
+              const rowNodes = byLocalName(sheetXml, "row");
+              let cells = 0;
+              for (const row of rowNodes) {
+                if (data.rows.length >= MAX_TABLE_ROWS) break;
+                const rowValue = [];
+                byLocalName(row, "c").forEach((cell) => {
+                  if (cells >= MAX_SHEET_CELLS) return;
+                  cells += 1;
+                  const ref = cell.getAttribute("r") || "";
+                  const column = columnIndex(ref);
+                  const type = cell.getAttribute("t");
+                  let value = "";
+                  if (type === "inlineStr") {
+                    value = textOf(cell);
+                  } else {
+                    const vNode = byLocalName(cell, "v")[0];
+                    const raw = vNode ? vNode.textContent : "";
+                    if (type === "s") value = shared[Number(raw)] || "";
+                    else if (type === "b") value = raw === "1" ? "TRUE" : "FALSE";
+                    else value = raw;
+                  }
+                  rowValue.push({ column: column, text: value, numeric: type !== "s" && type !== "str" && type !== "inlineStr" });
+                });
+                data.rows.push(rowValue);
+              }
+            }
+          } catch (error) {
+            data.error = error.message;
+          }
+          sheetsData.push(data);
+        }
+        return { sheets: sheetsData };
+      }
+
+      function columnIndex(ref) {
+        const letters = /^([A-Z]+)/.exec(String(ref).toUpperCase());
+        if (!letters) return 0;
+        return letters[1].split("").reduce((sum, ch) => sum * 26 + (ch.charCodeAt(0) - 64), 0);
+      }
+
+      function formatCellValue(cell) {
+        if (!cell || cell.text === "") return "";
+        if (cell.numeric) {
+          const number = Number(cell.text);
+          if (!Number.isFinite(number)) return cell.text;
+          if (/e/i.test(cell.text)) return cell.text;
+          return String(Math.round(number * 1e8) / 1e8);
+        }
+        return cell.text;
+      }
+
+      function renderSheetTable(sheet) {
+        if (!sheet || !sheet.rows.length) {
+          return '<p class="doc-empty">这个工作表没有数据。</p>';
+        }
+        const width = Math.min(40, sheet.rows.reduce((max, row) => Math.max(max, row.length), 0));
+        let html = "<table><tbody>";
+        sheet.rows.forEach((row) => {
+          html += "<tr>";
+          for (let index = 0; index < width; index += 1) {
+            const cell = row[index];
+            const value = formatCellValue(cell);
+            html += "<td" + (cell && cell.numeric ? ' class="num"' : "") + ">" + escapeHtml(value) + "</td>";
+          }
+          html += "</tr>";
+        });
+        return html + "</tbody></table>";
+      }
+
+      /* ---- PPTX：按 slideN.xml 顺序逐页提取文字 ---- */
+      async function parsePptx(bytes) {
+        const names = storeNames(bytes).filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name));
+        names.sort((a, b) => Number(/(\d+)\.xml$/.exec(a)[1]) - Number(/(\d+)\.xml$/.exec(b)[1]));
+        if (!names.length) throw new Error("PPTX 中没有找到幻灯片内容，可能是损坏的文件。");
+        const pages = [];
+        for (const name of names) {
+          const xml = await extractXml(bytes, name);
+          const paragraphs = byLocalName(xml, "p")
+            .map((para) => byLocalName(para, "t").map((node) => node.textContent).join("").trim())
+            .filter((text) => text.length > 0);
+          pages.push(paragraphs);
+        }
+        return { pages: pages };
+      }
+
+      /* ---- PDF：用 pdf.js 逐页绘制真实页面 ---- */
+      let pdfPromise = null;
+      function loadPdfJs() {
+        if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+        if (pdfPromise) return pdfPromise;
+        pdfPromise = new Promise((resolve, reject) => {
+          const script = document.createElement("script");
+          script.src = "vendor/pdf.min.js";
+          script.async = true;
+          script.onload = () => {
+            if (!window.pdfjsLib) {
+              reject(new Error(UNAVAILABLE));
+              return;
+            }
+            window.pdfjsLib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js";
+            resolve(window.pdfjsLib);
+          };
+          script.onerror = () => {
+            // 允许后续重试重新加载，避免一次网络波动后永久失败
+            pdfPromise = null;
+            reject(new Error(UNAVAILABLE));
+          };
+          document.head.appendChild(script);
+        });
+        return pdfPromise;
+      }
+
+      async function renderPdfPages(bytes, mount) {
+        const pdfjs = await loadPdfJs();
+        const task = pdfjs.getDocument({ data: bytes.slice(), isEvalSupported: false });
+        const pdf = await task.promise;
+        const label = document.createElement("p");
+        label.className = "doc-note";
+        label.textContent = "共 " + pdf.numPages + " 页 · 逐页渲染真实页面内容";
+        mount.appendChild(label);
+        const maxPages = Math.min(pdf.numPages, 15);
+        let textLength = 0;
+        for (let pageNumber = 1; pageNumber <= maxPages; pageNumber += 1) {
+          const page = await pdf.getPage(pageNumber);
+          const viewport = page.getViewport({ scale: 1 });
+          const targetWidth = Math.min(820, Math.max(420, mount.clientWidth - 48));
+          const scale = targetWidth / viewport.width;
+          const scaled = page.getViewport({ scale: scale });
+          const ratio = window.devicePixelRatio || 1;
+          const canvas = document.createElement("canvas");
+          canvas.width = Math.floor(scaled.width * ratio);
+          canvas.height = Math.floor(scaled.height * ratio);
+          canvas.style.width = "100%";
+          canvas.style.height = "auto";
+          canvas.style.display = "block";
+          canvas.style.borderRadius = "12px";
+          canvas.style.background = "#FFFFFF";
+          const wrapper = document.createElement("div");
+          wrapper.className = "doc-page";
+          const caption = document.createElement("p");
+          caption.className = "doc-page-label";
+          caption.style.marginBottom = "10px";
+          caption.textContent = "第 " + pageNumber + " 页";
+          wrapper.appendChild(caption);
+          wrapper.appendChild(canvas);
+          mount.appendChild(wrapper);
+          const context = canvas.getContext("2d");
+          await page.render({ canvasContext: context, viewport: scaled, transform: ratio !== 1 ? [ratio, 0, 0, ratio, 0, 0] : null }).promise;
+          const content = await page.getTextContent();
+          textLength += content.items.map((item) => item.str).join("").length;
+          page.cleanup();
+        }
+        if (pdf.numPages > maxPages) {
+          const more = document.createElement("p");
+          more.className = "doc-note";
+          more.textContent = "为保证页面流畅，仅渲染前 " + maxPages + " 页；保存下载仍是完整原始 PDF。";
+          mount.appendChild(more);
+        }
+        return { pageCount: pdf.numPages, textLength: textLength };
+      }
+
+      function mountShell(mount, warning) {
+        mount.innerHTML = "";
+        if (warning) {
+          const box = document.createElement("div");
+          box.className = "doc-warning";
+          box.textContent = warning;
+          mount.appendChild(box);
+        }
+      }
+
+      async function renderPreview(item, mount) {
+        const bytes = item.edited && item.edited.bytes ? new Uint8Array(item.edited.bytes) : new Uint8Array(item.bytes);
+        const warning = item.edited && item.edited.html ? "正在展示编辑器中的修改版本；保存下载将导出与当前内容一致的副本。" : "";
+        mountShell(mount, warning);
+        try {
+          if (item.ext === "md") {
+            const html = renderMarkdown(decodeText(bytes));
+            mount.insertAdjacentHTML("beforeend", html);
+            const text = plainFromDom(html);
+            return { pageCount: 1, text: text };
+          }
+          if (item.ext === "docx") {
+            const result = await parseDocx(bytes, item.name);
+            mount.insertAdjacentHTML("beforeend", result.html);
+            mount.insertAdjacentHTML("beforeend", '<p class="' + (result.partial ? "doc-warning" : "doc-note") + '">' + escapeHtml(result.note) + "</p>");
+            return { pageCount: result.pageCount, text: result.text };
+          }
+          if (item.ext === "xlsx") {
+            const result = await parseXlsx(bytes);
+            const tabs = document.createElement("div");
+            tabs.className = "sheet-tabs";
+            const stage = document.createElement("div");
+            const showSheet = (index) => {
+              Array.prototype.forEach.call(tabs.children, (tab, tabIndex) => {
+                tab.classList.toggle("is-active", tabIndex === index);
+              });
+              const sheet = result.sheets[index];
+              stage.innerHTML = renderSheetTable(sheet) + (sheet && sheet.error ? '<p class="doc-note">' + escapeHtml(sheet.error) + "</p>" : "");
+            };
+            result.sheets.forEach((sheet, index) => {
+              const tab = document.createElement("button");
+              tab.type = "button";
+              tab.className = "sheet-tab";
+              tab.textContent = sheet.name;
+              tab.addEventListener("click", () => showSheet(index));
+              tabs.appendChild(tab);
+            });
+            mount.appendChild(tabs);
+            mount.appendChild(stage);
+            if (result.sheets.length) showSheet(0);
+            const note = document.createElement("p");
+            note.className = "doc-note";
+            note.textContent = "共 " + result.sheets.length + " 个工作表 · 单表最多展示 " + MAX_TABLE_ROWS + " 行";
+            mount.appendChild(note);
+            return { pageCount: result.sheets.length };
+          }
+          if (item.ext === "pptx") {
+            const result = await parsePptx(bytes);
+            result.pages.forEach((paragraphs, index) => {
+              const page = document.createElement("div");
+              page.className = "doc-page";
+              page.innerHTML = '<p class="doc-page-label" style="margin-bottom:10px">第 ' + (index + 1) + " 页</p>" +
+                (paragraphs.length ? paragraphs.map((text) => "<p>" + escapeHtml(text) + "</p>").join("") : '<p class="doc-empty">这一页没有文字内容（可能是纯图片页）。</p>');
+              mount.appendChild(page);
+            });
+            const note = document.createElement("p");
+            note.className = "doc-note";
+            note.textContent = "共 " + result.pages.length + " 页 · 已提取每页文字，版式与图片不在文字预览中。";
+            mount.appendChild(note);
+            return { pageCount: result.pages.length };
+          }
+          mount.insertAdjacentHTML("beforeend", '<p class="doc-empty">这种格式暂不支持完整预览，只能保存下载原始文件。</p>');
+          return { pageCount: 0 };
+        } catch (error) {
+          const detail = escapeHtml(error && error.message ? error.message : "读取失败");
+          const headline = item.ext === "docx" ? "Word 文档无法解析（" + detail + "）" : "该格式暂不支持完整预览：" + detail;
+          mount.insertAdjacentHTML("beforeend", '<div class="doc-warning">' + headline + "</div>" +
+            '<p class="doc-empty">仍可点击「保存下载」取回原始文件，文件内容未被修改。</p>');
+          return { pageCount: 0 };
+        }
+      }
+
+      async function mountInto(mount, item) {
+        if (!mount || !item) return { pageCount: 0 };
+        let result;
+        if (item.ext === "pdf") {
+          mount.innerHTML = '<p class="doc-note" style="margin-top:0">正在读取「' + escapeHtml(item.name) + "」…</p>";
+          try {
+            const info = await renderPdfPages(new Uint8Array(item.bytes), mount);
+            result = { pageCount: info.pageCount };
+          } catch (error) {
+            mountShell(mount, "该格式暂不支持完整预览：" + (error.message || UNAVAILABLE));
+            mount.insertAdjacentHTML("beforeend", '<p class="doc-empty">仍可点击「保存下载」取回原始 PDF 文件。</p>');
+            result = { pageCount: 0 };
+          }
+        } else {
+          mount.innerHTML = '<p class="doc-note" style="margin-top:0">正在读取「' + escapeHtml(item.name) + "」…</p>";
+          result = await renderPreview(item, mount);
+        }
+        return result;
+      }
+
+      /* ---- 编辑页回写：统一后的 HTML / 文本导出 ---- */
+      function widgetToMarkdown(root) {
+        const lines = [];
+        Array.prototype.forEach.call(root.children, (node) => {
+          const tag = node.tagName.toLowerCase();
+          if (/^h[1-6]$/.test(tag)) {
+            lines.push("");
+            lines.push("#".repeat(Number(tag[1])) + " " + node.innerText.trim());
+            lines.push("");
+          } else if (tag === "ul" || tag === "ol") {
+            Array.prototype.forEach.call(node.children, (li, index) => {
+              lines.push((tag === "ol" ? index + 1 + "." : "-") + " " + li.innerText.trim());
+            });
+            lines.push("");
+          } else if (tag === "pre") {
+            lines.push("```");
+            lines.push(node.innerText.replace(/\n$/, ""));
+            lines.push("```");
+            lines.push("");
+          } else if (tag === "blockquote") {
+            lines.push("> " + node.innerText.trim().replace(/\n/g, "\n> "));
+            lines.push("");
+          } else if (tag === "table") {
+            const rows = Array.prototype.slice.call(node.querySelectorAll("tr"));
+            rows.forEach((row, rowIndex) => {
+              const cells = Array.prototype.slice.call(row.children).map((cell) => cell.innerText.trim().replace(/\|/g, "\\|"));
+              lines.push("| " + cells.join(" | ") + " |");
+              if (rowIndex === 0) lines.push("| " + cells.map(() => "---").join(" | ") + " |");
+            });
+            lines.push("");
+          } else if (tag === "hr") {
+            lines.push("---");
+            lines.push("");
+          } else {
+            const text = node.innerText.trim();
+            if (text) {
+              lines.push(text);
+              lines.push("");
+            }
+          }
+        });
+        return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim() + "\n";
+      }
+
+      function widgetToText(root) {
+        const blocks = [];
+        Array.prototype.forEach.call(root.children, (node) => {
+          const tag = node.tagName.toLowerCase();
+          if (tag === "table") {
+            Array.prototype.forEach.call(node.querySelectorAll("tr"), (row) => {
+              blocks.push(Array.prototype.slice.call(row.children).map((cell) => cell.innerText.trim()).join(" | "));
+            });
+          } else {
+            const text = node.innerText.replace(/\n{3,}/g, "\n\n").trim();
+            if (text) blocks.push(text);
+          }
+        });
+        return blocks.join("\n\n") + "\n";
+      }
+
+      function buildExportedHtml(item, bodyHtml) {
+        return "<!DOCTYPE html>\n<html lang=\"zh-CN\"><head><meta charset=\"UTF-8\">\n<title>" + escapeHtml(item.name) + "</title>\n<style>\n" +
+          'body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Microsoft YaHei",sans-serif;color:#1D1D1F;background:#F5F5F7;margin:0;padding:48px;}\n' +
+          "article{max-width:900px;margin:0 auto;background:#FFFFFF;padding:56px;border-radius:24px;box-shadow:0 1px 2px rgba(0,0,0,0.03),0 14px 30px -14px rgba(0,0,0,0.07);}\n" +
+          "h1{font-size:40px;line-height:1.1;margin:20px 0;font-weight:600;letter-spacing:-0.03em;}\n" +
+          "h2{font-size:26px;margin-top:32px;font-weight:600;letter-spacing:-0.02em;}\n" +
+          "h3{font-size:20px;margin-top:24px;font-weight:600;}\n" +
+          "p{line-height:1.8;font-size:14px;}\n" +
+          "blockquote{background:#F5F5F7;padding:18px 20px;margin:20px 0;border-radius:12px;}\n" +
+          "pre{background:#F5F5F7;padding:16px;border-radius:12px;overflow:auto;}\n" +
+          "table{width:100%;border-collapse:collapse;font-size:12px;margin:16px 0;}\n" +
+          "th,td{border:1px solid rgba(0,0,0,0.08);padding:10px;text-align:left;}\n" +
+          "</style></head><body><article>\n" + bodyHtml + "\n</article></body></html>";
+      }
+
+      function buildEditedExport(item) {
+        const base = item.name.replace(/\.[^.]+$/, "");
+        if (item.ext === "md") {
+          return { blob: new Blob([item.edited.text], { type: "text/markdown;charset=utf-8" }), name: item.name };
+        }
+        // 首页不具备 DOCX/XLSX 回写能力，这里导出同步的 Markdown 副本，避免把表格/标题降级成 HTML
+        const text = item.edited.text || "";
+        if (item.ext === "docx" || item.ext === "xlsx" || item.ext === "pptx") {
+          return { blob: new Blob([text], { type: "text/markdown;charset=utf-8" }), name: base + "（已编辑）.md" };
+        }
+        return { blob: new Blob([buildExportedHtml(item, item.edited.html)], { type: "text/html;charset=utf-8" }), name: base + ".html" };
+      }
+
+      function downloadBlob(blob, name) {
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = name;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.setTimeout(() => URL.revokeObjectURL(url), 1500);
+      }
+
+      /* ---- DOCX 回写：编辑区 DOM → word/document.xml，保留标题层级与段落 ---- */
+      function xmlEscape(value) {
+        return String(value == null ? "" : value)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;");
+      }
+
+      function runsToDocx(node, style) {
+        const parts = [];
+        Array.prototype.forEach.call(node.childNodes, (child) => {
+          if (child.nodeType === 3) {
+            const text = child.nodeValue;
+            if (!text) return;
+            parts.push('<w:r><w:rPr>' + runProps(style) + '</w:rPr><w:t xml:space="preserve">' + xmlEscape(text) + "</w:t></w:r>");
+            return;
+          }
+          if (child.nodeType !== 1) return;
+          const tag = child.tagName.toLowerCase();
+          if (tag === "br") {
+            parts.push("<w:r><w:br/></w:r>");
+            return;
+          }
+          const next = Object.assign({}, style);
+          if (tag === "strong" || tag === "b") next.bold = true;
+          if (tag === "em" || tag === "i") next.italic = true;
+          if (tag === "u") next.underline = true;
+          if (tag === "s" || tag === "del") next.strike = true;
+          if (tag === "code") next.code = true;
+          parts.push(wrapRuns(runsToDocx(child, next), next));
+        });
+        return parts.join("");
+      }
+
+      function wrapRuns(xml, style) {
+        if (!xml) return "";
+        if (!style.bold && !style.italic && !style.underline && !style.strike && !style.code) return xml;
+        // 子片段已各自带有 <w:r>，这里只需给已有 run 的 rPr 追加样式，避免包裹出非法的嵌套 run
+        const props = runProps(style);
+        return xml.replace(/<w:r>((?!<w:rPr>).*?)<\/w:r>/g, function (match, body) {
+          return "<w:r><w:rPr>" + props + "</w:rPr>" + body + "</w:r>";
+        });
+      }
+
+      function runProps(style) {
+        const props = [];
+        if (style.bold) props.push("<w:b/>");
+        if (style.italic) props.push("<w:i/>");
+        if (style.underline) props.push("<w:u w:val=\"single\"/>");
+        if (style.strike) props.push("<w:strike/>");
+        if (style.code) props.push('<w:rFonts w:ascii="Consolas" w:hAnsi="Consolas"/>');
+        return props.join("");
+      }
+
+      function blockToDocx(node) {
+        const tag = node.tagName.toLowerCase();
+        if (/^h[1-6]$/.test(tag)) {
+          return '<w:p><w:pPr><w:pStyle w:val="Heading' + tag[1] + '"/></w:pPr>' + runsToDocx(node, { bold: true }) + "</w:p>";
+        }
+        if (tag === "ul" || tag === "ol") {
+          return Array.prototype.map.call(node.children, (li, index) => {
+            const marker = tag === "ol" ? index + 1 + ". " : "• ";
+            const holder = document.createElement("span");
+            holder.appendChild(document.createTextNode(marker));
+            Array.prototype.forEach.call(li.childNodes, (child) => holder.appendChild(child.cloneNode(true)));
+            return "<w:p>" + runsToDocx(holder, {}) + "</w:p>";
+          }).join("");
+        }
+        if (tag === "blockquote") {
+          return "<w:p><w:pPr><w:pStyle w:val=\"Quote\"/></w:pPr>" + runsToDocx(node, { italic: true }) + "</w:p>";
+        }
+        if (tag === "pre") {
+          return String(node.innerText || "").split("\n").map((line) => '<w:p><w:r><w:rPr><w:rFonts w:ascii="Consolas" w:hAnsi="Consolas"/></w:rPr><w:t xml:space="preserve">' + xmlEscape(line) + "</w:t></w:r></w:p>").join("");
+        }
+        if (tag === "table") {
+          const rows = Array.prototype.slice.call(node.querySelectorAll("tr"));
+          return rows.map((row) => {
+            const cells = Array.prototype.slice.call(row.children).map((cell) => {
+              return "<w:tc><w:tcPr><w:tcW w:w=\"2400\" w:type=\"dxa\"/></w:tcPr><w:p>" + runsToDocx(cell, {}) + "</w:p></w:tc>";
+            }).join("");
+            return "<w:tbl><w:tblPr><w:tblW w:w=\"0\" w:type=\"auto\"/><w:tblBorders><w:top w:val=\"single\" w:sz=\"4\" w:color=\"D0D0D0\"/><w:left w:val=\"single\" w:sz=\"4\" w:color=\"D0D0D0\"/><w:bottom w:val=\"single\" w:sz=\"4\" w:color=\"D0D0D0\"/><w:right w:val=\"single\" w:sz=\"4\" w:color=\"D0D0D0\"/><w:insideH w:val=\"single\" w:sz=\"4\" w:color=\"D0D0D0\"/><w:insideV w:val=\"single\" w:sz=\"4\" w:color=\"D0D0D0\"/></w:tblBorders></w:tblPr><w:tr>" + cells + "</w:tr></w:tbl>";
+          }).join("");
+        }
+        if (tag === "hr") {
+          return '<w:p><w:pPr><w:pBdr><w:bottom w:val="single" w:sz="6" w:space="1" w:color="D0D0D0"/></w:pBdr></w:pPr></w:p>';
+        }
+        return "<w:p>" + runsToDocx(node, {}) + "</w:p>";
+      }
+
+      function buildDocx(html) {
+        const holder = document.createElement("div");
+        holder.innerHTML = html || "";
+        const bodyXml = Array.prototype.map.call(holder.children, blockToDocx).join("") || "<w:p/>";
+        const files = [
+          {
+            name: "[Content_Types].xml",
+            data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/></Types>'
+          },
+          {
+            name: "_rels/.rels",
+            data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>'
+          },
+          {
+            name: "word/_rels/document.xml.rels",
+            data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>'
+          },
+          {
+            name: "word/styles.xml",
+            data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:style w:type="paragraph" w:styleId="Normal"><w:name w:val="Normal"/></w:style>' +
+              [1, 2, 3, 4, 5, 6].map((level) => '<w:style w:type="paragraph" w:styleId="Heading' + level + '"><w:name w:val="heading ' + level + '"/><w:basedOn w:val="Normal"/><w:qFormat/><w:pPr><w:keepNext/><w:spacing w:before="240" w:after="80"/><w:outlineLvl w:val="' + (level - 1) + '"/></w:pPr><w:rPr><w:b/><w:sz w:val="' + (44 - level * 4) + '"/></w:rPr></w:style>').join("") +
+              '<w:style w:type="paragraph" w:styleId="Quote"><w:name w:val="Quote"/><w:basedOn w:val="Normal"/><w:rPr><w:i/></w:rPr></w:style></w:styles>'
+          },
+          {
+            name: "word/document.xml",
+            data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>' + bodyXml + '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/></w:sectPr></w:body></w:document>'
+          }
+        ];
+        return zip(files);
+      }
+
+      /* ---- XLSX 回写：编辑区表格 → 每个表格一个工作表，首行作为表头 ---- */
+      function buildXlsx(html) {
+        const holder = document.createElement("div");
+        holder.innerHTML = html || "";
+        const tables = Array.prototype.slice.call(holder.querySelectorAll("table"));
+        const sheetList = [];
+        const sheetXmls = [];
+        if (tables.length) {
+          tables.forEach((table, index) => {
+            const rows = Array.prototype.slice.call(table.querySelectorAll("tr")).map((row) => Array.prototype.map.call(row.children, (cell) => cell.innerText.trim()));
+            sheetList.push({ name: "工作表" + (index + 1), rows: rows });
+          });
+        } else {
+          const lines = (holder.innerText || "").split("\n");
+          sheetList.push({ name: "Sheet1", rows: lines.map((line) => [line]) });
+        }
+        function colName(index) {
+          let name = "";
+          let n = index;
+          while (n >= 0) {
+            name = String.fromCharCode(65 + (n % 26)) + name;
+            n = Math.floor(n / 26) - 1;
+          }
+          return name;
+        }
+        sheetList.forEach((sheet, sheetIndex) => {
+          const sheetRows = sheet.rows.map((row, rowIndex) => {
+            const cells = row.map((value, colIndex) => {
+              const ref = colName(colIndex) + (rowIndex + 1);
+              const numeric = value !== "" && /^-?\d+(\.\d+)?$/.test(value);
+              return '<c r="' + ref + '"' + (numeric ? "" : ' t="inlineStr"') + ">" +
+                (numeric ? "<v>" + value + "</v>" : '<is><t xml:space="preserve">' + xmlEscape(value) + "</t></is>") +
+                "</c>";
+            }).join("");
+            return '<row r="' + (rowIndex + 1) + '">' + cells + "</row>";
+          }).join("");
+          sheetXmls.push('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>' + sheetRows + "</sheetData></worksheet>");
+          sheet.path = "xl/worksheets/sheet" + (sheetIndex + 1) + ".xml";
+        });
+        const files = [
+          {
+            name: "[Content_Types].xml",
+            data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' +
+              sheetList.map((sheet, index) => '<Override PartName="/xl/worksheets/sheet' + (index + 1) + '.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>').join("") + "</Types>"
+          },
+          {
+            name: "_rels/.rels",
+            data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'
+          },
+          {
+            name: "xl/_rels/workbook.xml.rels",
+            data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+              sheetList.map((sheet, index) => '<Relationship Id="rId' + (index + 1) + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet' + (index + 1) + '.xml"/>').join("") +
+              "</Relationships>"
+          },
+          {
+            name: "xl/workbook.xml",
+            data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>' +
+              sheetList.map((sheet, index) => '<sheet name="' + xmlEscape(sheet.name) + '" sheetId="' + (index + 1) + '" r:id="rId' + (index + 1) + '"/>').join("") +
+              "</sheets></workbook>"
+          }
+        ];
+        sheetList.forEach((sheet, index) => files.push({ name: sheet.path, data: sheetXmls[index] }));
+        return zip(files);
+      }
+
+      /* ---- 会话暂存：写入 IndexedDB，供编辑页直接读取真实文件 ---- */
+      function openSessionDb() {
+        return new Promise((resolve, reject) => {
+          if (!("indexedDB" in window)) {
+            reject(new Error("当前浏览器不支持本地文件会话存储。"));
+            return;
+          }
+          const request = indexedDB.open(SESSION_DB, 1);
+          request.onupgradeneeded = () => {
+            const db = request.result;
+            if (!db.objectStoreNames.contains(SESSION_STORE)) db.createObjectStore(SESSION_STORE);
+          };
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(new Error("本地会话存储不可用，可能处于隐私模式。"));
+        });
+      }
+
+      function saveSession(files, activeId) {
+        return openSessionDb().then((db) => new Promise((resolve) => {
+          try {
+            const transaction = db.transaction(SESSION_STORE, "readwrite");
+            const store = transaction.objectStore(SESSION_STORE);
+            const payload = {
+              activeId: activeId,
+              files: files.map((item) => ({
+                id: item.id,
+                name: item.name,
+                size: item.size,
+                ext: item.ext,
+                bytes: item.bytes,
+                edited: item.edited ? { html: item.edited.html, text: item.edited.text } : null
+              }))
+            };
+            if (files.length) store.put(payload, SESSION_KEY);
+            else store.delete(SESSION_KEY);
+            transaction.oncomplete = () => {
+              db.close();
+              resolve(true);
+            };
+            transaction.onerror = () => {
+              db.close();
+              resolve(false);
+            };
+          } catch (error) {
+            db.close();
+            resolve(false);
+          }
+        })).catch(() => false);
+      }
+
+      function listSession() {
+        return openSessionDb().then((db) => new Promise((resolve) => {
+          try {
+            const transaction = db.transaction(SESSION_STORE, "readonly");
+            const request = transaction.objectStore(SESSION_STORE).get(SESSION_KEY);
+            request.onsuccess = () => {
+              db.close();
+              const value = request.result;
+              resolve(value && Array.isArray(value.files) ? value.files : []);
+            };
+            request.onerror = () => {
+              db.close();
+              resolve([]);
+            };
+          } catch (error) {
+            db.close();
+            resolve([]);
+          }
+        })).catch(() => []);
+      }
+
+      return {
+        MAX_FILE_BYTES: MAX_FILE_BYTES,
+        validateFile: validateFile,
+        mountInto: mountInto,
+        widgetToMarkdown: widgetToMarkdown,
+        widgetToText: widgetToText,
+        buildExportedHtml: buildExportedHtml,
+        buildEditedExport: buildEditedExport,
+        downloadBlob: downloadBlob,
+        saveSession: saveSession,
+        listSession: listSession,
+        mimeFor: mimeFor,
+        escapeHtml: escapeHtml,
+        renderMarkdown: renderMarkdown,
+        parseDocx: parseDocx,
+        parseXlsx: parseXlsx,
+        parsePptx: parsePptx
+      };
+    })();
+
+    const fileInput = document.getElementById("fileInput");
+    const saveBtn = document.getElementById("saveBtn");
+    const statusDot = document.getElementById("statusDot");
+    const statusText = document.getElementById("statusText");
+    const fileCount = document.getElementById("fileCount");
+    const sessionStatus = document.getElementById("sessionStatus");
+    const fileList = document.getElementById("fileList");
+    const emptyView = document.getElementById("emptyView");
+    const loadedView = document.getElementById("loadedView");
+    const homeScroll = document.getElementById("homeScroll");
+    const loadedName = document.getElementById("loadedName");
+    const loadedKind = document.getElementById("loadedKind");
+    const loadedMeta = document.getElementById("loadedMeta");
+    const loadedExt = document.getElementById("loadedExt");
+    const realDoc = document.getElementById("realDoc");
+    const heroDrop = document.getElementById("heroDrop");
+    const heroDropText = document.getElementById("heroDropText");
+    const toast = document.getElementById("toast");
+    let toastTimer = null;
+
+    let persistWarned = false;
+
+    async function persistSession() {
+      const ok = await ReadReal.saveSession(state.files, state.activeId);
+      if (!ok && !persistWarned) {
+        persistWarned = true;
+        showToast("会话存储不可用：进入编辑器时会改用内存暂存当前文件，修改可能无法跨页保留。", "error");
+      }
+      if (ok) persistWarned = false;
+    }
+
+    async function refreshSessionCount() {
+      const entries = await ReadReal.listSession();
+      if (entries.length && !state.files.length) {
+        entries.forEach((item) => {
+          state.files.push({
+            id: item.id || "file-restored-" + state.sequence,
+            name: item.name,
+            size: item.size,
+            ext: item.ext,
+            bytes: item.bytes ? new Uint8Array(item.bytes) : null,
+            edited: item.edited || null,
+            dirty: false,
+            upload: { state: "done", percent: 100, detail: "已恢复" }
+          });
+        });
+        const first = state.files.find((item) => item.bytes && item.bytes.length);
+        state.activeId = first ? first.id : (state.files[0] && state.files[0].id);
+        updateUI();
+        if (first) {
+          showToast("已恢复上次会话中的 " + state.files.length + " 个文件，可点列表继续编辑。");
+        } else {
+          showToast("上次会话的文件数据已失效，请重新打开文件。", "error");
+        }
+      }
+    }
+
+    function openFilePicker() {
+      fileInput.click();
+    }
+
+    /* 跳转编辑页前同步暂存当前文件：IndexedDB 写入失败或受限时，编辑页仍能读到真实内容 */
+    window.cacheHandoffToEditor = function (item, activeId) {
+      try {
+        if (!item || !item.bytes || !item.bytes.length) {
+          window.name = "";
+          showToast("「" + (item ? item.name : "文件") + "」的本地数据已失效，请重新打开文件。", "error");
+          return false;
+        }
+        window.name = "liteoffice:" + JSON.stringify({
+          time: Date.now(),
+          activeId: activeId || item.id,
+          file: {
+            id: item.id,
+            name: item.name,
+            size: item.size,
+            ext: item.ext,
+            bytes: Array.from(item.bytes)
+          }
+        });
+        return true;
+      } catch (error) {
+        window.name = "";
+        showToast("会话存储不可用：" + (error.message || "浏览器拒绝暂存这份文件") + "，文件过大时请直接下载。", "error");
+        return false;
+      }
+    };
+
+    function getExtension(name) {
+      const parts = String(name).split(".");
+      return parts.length > 1 ? parts.pop().toLowerCase() : "";
+    }
+
+    function getActiveFile() {
+      return state.files.find((item) => item.id === state.activeId) || null;
+    }
+
+    function collectFiles(list) {
+      return Array.from(list || []);
+    }
+
+    function formatSize(bytes) {
+      if (!Number.isFinite(bytes) || bytes <= 0) return "0 KB";
+      if (bytes < 1024 * 1024) return Math.max(1, Math.round(bytes / 1024)) + " KB";
+      return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+    }
+
+    function showToast(message, tone) {
+      window.clearTimeout(toastTimer);
+      toast.textContent = message;
+      toast.className = tone === "error" ? TOAST_ERROR : TOAST_VISIBLE;
+      toastTimer = window.setTimeout(() => {
+        toast.className = TOAST_HIDDEN;
+      }, 2600);
+    }
+
+    function showCloudWorkspaceToast() {
+      showToast("云端工作区正在开发中，目前请使用本地安全模式");
+    }
+
+    function setSaveEnabled(enabled) {
+      saveBtn.disabled = !enabled;
+      saveBtn.className = enabled
+        ? "pill pill-secondary soft-focus flex h-9 items-center px-4 text-[13px] font-medium"
+        : "pill pill-disabled flex h-9 items-center px-4 text-[13px] font-medium";
+    }
+
+    function renderRealPreview(active) {
+      if (!realDoc) return;
+      realDoc.innerHTML = "";
+      const request = (realDoc.__request || 0) + 1;
+      realDoc.__request = request;
+      const shouldShow = () => realDoc.isConnected && realDoc.__request === request && state.activeId === active.id;
+      realDoc.innerHTML = '<p class="doc-note" style="margin-top:0">正在读取「' + ReadReal.escapeHtml(active.name) + "」…</p>";
+      Promise.resolve().then(() => ReadReal.mountInto(realDoc, active)).then((result) => {
+        if (shouldShow() && result && result.pageCount) {
+          realDoc.dataset.pages = String(result.pageCount);
+        }
+      }).catch((error) => {
+        if (!shouldShow()) return;
+        realDoc.innerHTML = '<div class="doc-warning">读取失败：' + ReadReal.escapeHtml(error && error.message ? error.message : "解析库未加载或文件损坏") +
+          '</div><p class="doc-empty">已保留可下载的原始文件，可点「保存下载」取回后再试。</p>';
+        showToast("「" + active.name + "」读取失败：" + (error && error.message ? error.message : "解析库未加载或文件损坏"), "error");
+      });
+    }
+
+    function renderFileList() {
+      fileList.innerHTML = "";
+
+      state.files.forEach((item) => {
+        const active = item.id === state.activeId;
+        const li = document.createElement("li");
+        li.className = "px-4 py-1";
+
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = active
+          ? "group flex w-full items-start gap-3 rounded-[12px] border border-white/[0.06] bg-[#2C2C2E] px-4 py-3.5 text-left text-[#F5F5F7] transition-all duration-300"
+          : "group flex w-full items-start gap-3 rounded-[12px] px-4 py-3.5 text-left text-[#F5F5F7] transition-all duration-300 hover:bg-white/[0.06]";
+        button.setAttribute("aria-label", "选择文件 " + item.name);
+        button.setAttribute("aria-current", active ? "true" : "false");
+        button.addEventListener("click", () => openEditor(item.id));
+
+        const ext = document.createElement("span");
+        ext.className = active
+          ? "grid h-9 w-9 shrink-0 place-items-center rounded-[10px] bg-[#0A84FF]/[0.14] text-[9px] font-semibold tracking-[0.04em] text-[#0A84FF]"
+          : "grid h-9 w-9 shrink-0 place-items-center rounded-[10px] border border-white/[0.06] bg-white/[0.06] text-[9px] font-semibold tracking-[0.04em] text-[#98989D] transition-colors duration-300";
+        ext.textContent = item.ext.toUpperCase();
+
+        const copy = document.createElement("span");
+        copy.className = "min-w-0 flex-1";
+
+        const name = document.createElement("span");
+        name.className = "block truncate text-[13px] font-medium";
+        name.textContent = item.name;
+
+        const meta = document.createElement("span");
+        meta.className = "mt-1 block text-[11px] text-[#98989D]";
+        meta.textContent = (FILE_KINDS[item.ext] || "文件") + " · " + formatSize(item.size);
+
+        copy.appendChild(name);
+        copy.appendChild(meta);
+
+        const arrow = document.createElement("iconify-icon");
+        arrow.setAttribute("icon", active ? "solar:arrow-right-linear" : "solar:arrow-up-right-linear");
+        arrow.setAttribute("aria-hidden", "true");
+        arrow.className = active
+          ? "mt-2 shrink-0 text-[14px] text-[#0A84FF]"
+          : "icon-soft mt-2 shrink-0 text-[14px] text-[#98989D] transition-transform duration-300 group-hover:-translate-y-0.5";
+
+        button.appendChild(ext);
+        button.appendChild(copy);
+        button.appendChild(arrow);
+        li.appendChild(button);
+        fileList.appendChild(li);
+      });
+    }
+
+    function renderActiveFile() {
+      const active = getActiveFile();
+      if (homeScroll) homeScroll.scrollTop = 0;
+
+      if (!active) {
+        emptyView.classList.remove("hidden");
+        emptyView.classList.add("flex");
+        loadedView.classList.add("hidden");
+        loadedView.classList.remove("flex");
+        document.querySelectorAll("#emptyView .scroll-reveal").forEach((el) => {
+          el.classList.add("show");
+        });
+        setSaveEnabled(false);
+        statusText.textContent = "还没有打开文件";
+        statusDot.className = "h-1.5 w-1.5 shrink-0 rounded-full bg-white/25 transition-colors duration-300";
+        return;
+      }
+
+      emptyView.classList.add("hidden");
+      emptyView.classList.remove("flex");
+      loadedView.classList.remove("hidden");
+      loadedView.classList.add("flex");
+      document.querySelectorAll("#emptyView .scroll-reveal").forEach((el) => {
+        el.classList.add("show");
+      });
+
+      loadedName.textContent = active.name;
+      loadedKind.textContent = FILE_KINDS[active.ext] || "文件";
+      loadedMeta.textContent = formatSize(active.size) + " · " + active.ext.toUpperCase() + " · 仅保存在本机";
+      loadedExt.textContent = active.ext.toUpperCase();
+      renderRealPreview(active);
+
+      statusText.textContent = active.name;
+      statusDot.className = "h-1.5 w-1.5 shrink-0 rounded-full bg-[#0A84FF] transition-colors duration-300";
+      setSaveEnabled(true);
+    }
+
+    function updateUI() {
+      fileCount.textContent = String(state.files.length);
+      const hasFiles = state.files.length > 0;
+
+      if (hasFiles) {
+        sessionStatus.textContent = "当前会话：" + state.files.length + " 个文件";
+        fileList.classList.remove("hidden");
+      } else {
+        sessionStatus.textContent = "当前会话：暂无文件";
+        fileList.classList.add("hidden");
+      }
+
+      renderFileList();
+      renderActiveFile();
+    }
+
+    async function addFile(file) {
+      const ext = getExtension(file.name);
+      if (!ALLOWED_EXTENSIONS.includes(ext)) {
+        showToast("暂不支持这种格式，请选择 docx、xlsx、pptx、md 或 pdf。", "error");
+        return;
+      }
+
+      const duplicate = state.files.find((item) => item.name === file.name && item.size === file.size);
+      if (duplicate) {
+        state.activeId = duplicate.id;
+        updateUI();
+        persistSession();
+        showToast("这个文件已经在本次会话中。");
+        return;
+      }
+
+      let bytes;
+      try {
+        bytes = await ReadReal.validateFile(file);
+      } catch (error) {
+        showToast(error.message || "这个文件读取失败。", "error");
+        return;
+      }
+
+      state.sequence += 1;
+      const item = {
+        id: "file-" + Date.now() + "-" + state.sequence,
+        file: file,
+        bytes: bytes,
+        name: file.name,
+        size: file.size,
+        ext: ext,
+        edited: null
+      };
+
+      state.files.push(item);
+      state.activeId = item.id;
+      updateUI();
+      persistSession();
+      showToast("已打开 " + item.name + "，文件只留在本机。");
+    }
+
+    function selectFile(id) {
+      if (!id) return;
+      state.activeId = id;
+      updateUI();
+      const active = getActiveFile();
+      if (active) showToast("已切换到 " + active.name);
+    }
+
+    async function openEditor(id) {
+      if (!id) {
+        showToast("请先打开一个真实文件，再进入编辑器。", "error");
+        return;
+      }
+      state.activeId = id;
+      renderFileList();
+      const active = getActiveFile();
+      // 先同步把当前文件写入 window.name，IndexedDB 不可用或写入失败时编辑页仍能拿到真实内容
+      if (!window.cacheHandoffToEditor(active, state.activeId)) {
+        showToast("无法为编辑页暂存这份文件，请留在本页编辑或直接下载。", "error");
+        return;
+      }
+      const ok = await ReadReal.saveSession(state.files, state.activeId);
+      if (!ok) showToast("会话存储不可用，已改用内存传递；编辑页如未载入请重新选择文件。", "error");
+      window.setTimeout(() => {
+        window.location.href = "editor.html";
+      }, ok ? 0 : 600);
+    }
+
+    function clearSession() {
+      state.files = [];
+      state.activeId = null;
+      updateUI();
+      persistSession();
+      showToast("本次会话已清空，文件记录不会保留。");
+    }
+
+    async function downloadActive() {
+      const active = getActiveFile();
+      if (!active) {
+        showToast("请先打开一个文件。", "error");
+        return;
+      }
+      if (active.edited && (active.edited.html || active.edited.text)) {
+        let exported;
+        try {
+          exported = ReadReal.buildEditedExport(active);
+          ReadReal.downloadBlob(exported.blob, exported.name);
+        } catch (error) {
+          showToast("导出失败：" + (error && error.message ? error.message : "格式写入出错"), "error");
+          return;
+        }
+        if (active.ext === "docx" || active.ext === "xlsx" || active.ext === "pptx") {
+          showToast("工作台暂不支持该格式回写，已导出编辑后的 Markdown 副本 " + exported.name + "；保留原格式请到编辑页保存下载。");
+        } else if (active.ext === "pdf") {
+          showToast("PDF 暂不支持回写编辑结果，已导出编辑后的 HTML 副本 " + exported.name);
+        } else {
+          showToast("已导出包含编辑结果的真实 " + exported.name);
+        }
+        return;
+      }
+      if (!active.bytes || !active.bytes.length) {
+        showToast("这个文件的数据已不在本地会话中，请重新打开文件后再下载。", "error");
+        return;
+      }
+      const blob = new Blob([active.bytes], { type: ReadReal.mimeFor(active.ext) });
+      ReadReal.downloadBlob(blob, active.name);
+      showToast("已从本机导出原始文件 " + active.name);
+    }
+
+    function setDragActive(isActive) {
+      heroDrop.classList.toggle("is-dragover", isActive);
+      heroDropText.textContent = isActive ? "松开打开文件" : "或拖入文件";
+    }
+
+    function isFileDrag(event) {
+      return !!event.dataTransfer && Array.from(event.dataTransfer.types).includes("Files");
+    }
+
+    fileInput.addEventListener("change", async (event) => {
+      const chosen = collectFiles(event.target.files);
+      fileInput.value = "";
+      for (const file of chosen) {
+        try {
+          await addFile(file);
+        } catch (error) {
+          showToast("读取失败：" + (error && error.message ? error.message : "文件损坏或无法访问"), "error");
+        }
+      }
+    });
+
+    saveBtn.addEventListener("click", downloadActive);
+    document.getElementById("downloadBtn").addEventListener("click", downloadActive);
+    document.getElementById("downloadBtn2").addEventListener("click", downloadActive);
+    document.getElementById("clearBtn").addEventListener("click", clearSession);
+
+    heroDrop.addEventListener("dragenter", (event) => {
+      if (!isFileDrag(event)) return;
+      event.preventDefault();
+      setDragActive(true);
+    });
+
+    heroDrop.addEventListener("dragover", (event) => {
+      if (!isFileDrag(event)) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "copy";
+      setDragActive(true);
+    });
+
+    heroDrop.addEventListener("dragleave", (event) => {
+      if (!heroDrop.contains(event.relatedTarget)) setDragActive(false);
+    });
+
+    window.addEventListener("dragenter", (event) => {
+      if (!isFileDrag(event)) return;
+      event.preventDefault();
+    });
+
+    window.addEventListener("dragover", (event) => {
+      if (!isFileDrag(event)) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "copy";
+    });
+
+    window.addEventListener("dragleave", (event) => {
+      if (!event.relatedTarget) setDragActive(false);
+    });
+
+    async function acceptDroppedFiles(dropped) {
+      const listed = collectFiles(dropped);
+      if (!listed.length) return;
+      for (const file of listed) {
+        try {
+          await addFile(file);
+        } catch (error) {
+          showToast("读取失败：" + (error && error.message ? error.message : "文件损坏或无法访问"), "error");
+        }
+      }
+    }
+
+    heroDrop.addEventListener("drop", (event) => {
+      if (!isFileDrag(event)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      setDragActive(false);
+      acceptDroppedFiles(event.dataTransfer && event.dataTransfer.files);
+    });
+
+    window.addEventListener("drop", (event) => {
+      if (!isFileDrag(event)) return;
+      event.preventDefault();
+      setDragActive(false);
+      acceptDroppedFiles(event.dataTransfer && event.dataTransfer.files);
+    });
+
+    document.addEventListener("keydown", (event) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "o") {
+        event.preventDefault();
+        openFilePicker();
+      }
+    });
+
+    try {
+      updateUI();
+    } catch (error) {
+      console.error(error);
+      showToast("首页初始化异常：" + (error && error.message ? error.message : "未知错误"));
+    }
+    try {
+      const restoreTask = refreshSessionCount();
+      if (restoreTask && typeof restoreTask.catch === "function") {
+        restoreTask.catch((error) => {
+          showToast("恢复上次会话失败：" + (error && error.message ? error.message : "会话存储不可用"), "error");
+        });
+      }
+    } catch (error) {
+      showToast("恢复上次会话失败：" + (error && error.message ? error.message : "会话存储不可用"), "error");
+    }
+
+    // 卡片聚光灯：真实鼠标坐标驱动 radial-gradient
+    const heroCard = document.getElementById("heroCard");
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+
+    if (heroCard && !reducedMotion.matches) {
+      let spotlightFrame = null;
+
+      heroCard.addEventListener("pointermove", (event) => {
+        if (event.pointerType === "touch") return;
+        const rect = heroCard.getBoundingClientRect();
+        const x = event.clientX - rect.left;
+        const y = event.clientY - rect.top;
+        if (spotlightFrame) return;
+        spotlightFrame = window.requestAnimationFrame(() => {
+          spotlightFrame = null;
+          heroCard.style.setProperty("--spot-x", x + "px");
+          heroCard.style.setProperty("--spot-y", y + "px");
+          heroCard.classList.add("is-spotlight");
+        });
+      });
+
+      heroCard.addEventListener("pointerleave", () => {
+        if (spotlightFrame) {
+          window.cancelAnimationFrame(spotlightFrame);
+          spotlightFrame = null;
+        }
+        heroCard.classList.remove("is-spotlight");
+      });
+    }
+
+    // 数字滚动：加载时从 9 快速滚到 0，像老虎机一样停住
+    function rollDigits(el, delay) {
+      if (!el) return;
+      const track = el.querySelector(".digit-roller-track");
+      const target = Number(el.dataset.target || el.textContent || 0);
+      if (!track) {
+        el.textContent = String(target);
+        return;
+      }
+      if (reducedMotion.matches) {
+        track.style.transition = "none";
+        track.style.transform = "translateY(-" + (track.children.length - 1) * 100 + "%)";
+        return;
+      }
+      track.style.transition = "none";
+      track.style.transform = "translateY(0)";
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
+          window.setTimeout(() => {
+            track.style.transition = "transform 1.05s cubic-bezier(0.22, 1.4, 0.36, 1)";
+            track.style.transform = "translateY(-" + (track.children.length - 1) * 100 + "%)";
+          }, delay);
+        });
+      });
+    }
+
+    window.addEventListener("load", () => {
+      rollDigits(document.getElementById("uploadCount"), 260);
+    });
+
+    // 原生精准滚动：主内容区独立滚动，body 不滚动；滚动浮现与顶栏联动均绑定该容器
+    (function initScrollExperience() {
+      const scroller = document.getElementById("homeScroll");
+      const header = document.querySelector("header");
+      const reveals = Array.from(document.querySelectorAll(".scroll-reveal"));
+      const reduceQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+
+      function updateHeader() {
+        if (!header) return;
+        const offset = scroller ? scroller.scrollTop : 0;
+        header.classList.toggle("is-scrolled", offset > 50);
+      }
+
+      // 悬浮细滚动条：随容器滚动同步长度与位置，滚出视口后自动隐去
+      const rail = document.getElementById("scrollRail");
+      const railThumb = rail ? rail.querySelector(".scroll-rail-thumb") : null;
+
+      function updateRail() {
+        if (!scroller || !rail || !railThumb) return;
+        const viewport = scroller.clientHeight;
+        const total = scroller.scrollHeight;
+        const scrollable = total > viewport + 1;
+        if (!scrollable) {
+          rail.classList.remove("is-active");
+          return;
+        }
+        const ratio = viewport / total;
+        const thumbHeight = Math.max(36, Math.round((viewport - 8) * ratio));
+        const travel = viewport - thumbHeight;
+        const progress = scroller.scrollTop / (total - viewport);
+        railThumb.style.height = thumbHeight + "px";
+        railThumb.style.transform = "translateY(" + Math.round(Math.max(0, Math.min(1, progress)) * travel + 4) + "px)";
+        rail.classList.add("is-active");
+      }
+
+      function onScroll() {
+        updateHeader();
+        updateRail();
+      }
+
+      function showAll() {
+        reveals.forEach((el) => el.classList.add("show"));
+      }
+
+      if (reduceQuery.matches || !("IntersectionObserver" in window)) {
+        showAll();
+      } else {
+        const observer = new IntersectionObserver((entries) => {
+          entries.forEach((entry) => {
+            if (!entry.isIntersecting) return;
+            entry.target.classList.add("show");
+            observer.unobserve(entry.target);
+          });
+        }, { threshold: 0.12, rootMargin: "0px 0px -8% 0px", root: scroller });
+        reveals.forEach((el) => observer.observe(el));
+        // 首屏已可见卡片加载后立即显示，避免判定延迟造成长期透明
+        window.requestAnimationFrame(() => {
+          reveals.forEach((el) => {
+            const rect = el.getBoundingClientRect();
+            if (rect.top < window.innerHeight && rect.bottom > 0) el.classList.add("show");
+          });
+        });
+      }
+
+      if (scroller) {
+        scroller.addEventListener("scroll", onScroll, { passive: true });
+        scroller.addEventListener("pointerenter", () => {
+          if (rail) rail.classList.add("is-hover");
+        });
+        scroller.addEventListener("pointerleave", () => {
+          if (rail) rail.classList.remove("is-hover");
+        });
+        window.addEventListener("resize", updateRail);
+        if ("ResizeObserver" in window) {
+          new ResizeObserver(updateRail).observe(scroller);
+        }
+      }
+      onScroll();
+      window.requestAnimationFrame(updateRail);
+    })();
+  </script>
+</body>
+</html>

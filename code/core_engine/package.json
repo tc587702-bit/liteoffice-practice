@@ -1,0 +1,24 @@
+{
+  "name": "liteoffice",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "LiteOffice / 轻办公 — 开源轻量文档平台：零运行时依赖、多格式、低内存",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "scripts": {
+    "build": "node tools/build.mjs",
+    "serve": "node tools/build.mjs && node tools/serve.mjs",
+    "test": "node tools/test.mjs",
+    "lint": "node tools/lint.mjs",
+    "bench": "node --expose-gc bench/bench.mjs",
+    "validate": "node tools/validate.mjs",
+    "status": "node tools/status.mjs --write",
+    "verify-web": "node tools/build.mjs --quiet && node tools/verify-web.mjs",
+    "dist": "node tools/dist.mjs",
+    "dist:verify": "node tools/dist.mjs --verify",
+    "verify": "node tools/lint.mjs && node tools/build.mjs && node tools/verify-web.mjs && node tools/test.mjs && node --expose-gc bench/bench.mjs"
+  }
+}

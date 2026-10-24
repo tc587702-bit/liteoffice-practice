@@ -1,0 +1,11 @@
+{
+  "name": "@liteoffice/format-pptx",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "description": "PowerPoint OOXML 读取器（pptx / pptm / potx）-> UDM slides",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

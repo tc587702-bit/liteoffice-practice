@@ -1,0 +1,11 @@
+{
+  "name": "@liteoffice/engine",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "description": "格式嗅探与打开编排（把字节变成 UDM 文档）",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}
