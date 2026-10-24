@@ -1,0 +1,253 @@
+/*
+ * app.css —— 整体布局与组件样式
+ * 谁调用：index.html 直接 <link> 引入
+ * 不负责：打印样式（见 print.css）
+ *
+ * 约定：
+ *   1. 所有 class 以 lo- 开头，避免和将来引入的第三方样式冲突；
+ *   2. 不写标签选择器（button {} 这种），只写 class，否则会污染别处；
+ *   3. 颜色一律走 CSS 变量，改主题只改 :root。
+ */
+
+:root {
+  --lo-fg: #1a1a1a;
+  --lo-fg-muted: #6b7280;
+  --lo-line: #e5e5e5;
+  --lo-bg: #ffffff;
+  --lo-bg-soft: #f7f7f8;
+  --lo-accent: #2f6fed;
+  --lo-warn: #b45309;
+  --lo-error: #b91c1c;
+  --lo-radius: 8px;
+}
+
+* { box-sizing: border-box; }
+
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  /* 三行布局：工具栏 / 正文 / 状态栏 */
+  display: grid;
+  grid-template-rows: 44px 1fr 28px;
+  color: var(--lo-fg);
+  background: var(--lo-bg);
+  font: 14px/1.6 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+/* ---------------------------------------------------------------- 工具栏 */
+.lo-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--lo-line);
+  background: var(--lo-bg);
+}
+
+.lo-toolbar-left,
+.lo-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.lo-toolbar-left { margin-right: auto; min-width: 0; }
+
+.lo-brand {
+  font-weight: 600;
+  letter-spacing: .2px;
+}
+
+.lo-docname {
+  overflow: hidden;
+  max-width: 40vw;
+  color: var(--lo-fg-muted);
+  font-size: 13px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* ---------------------------------------------------------------- 按钮 */
+.lo-btn {
+  padding: 6px 12px;
+  border: 1px solid var(--lo-line);
+  border-radius: var(--lo-radius);
+  background: var(--lo-bg);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.lo-btn:hover:not(:disabled) {
+  border-color: var(--lo-accent);
+  color: var(--lo-accent);
+}
+
+.lo-btn:disabled {
+  opacity: .4;
+  cursor: not-allowed;
+}
+
+.lo-btn-primary {
+  border-color: var(--lo-accent);
+  background: var(--lo-accent);
+  color: #fff;
+}
+
+.lo-btn-primary:hover:not(:disabled) { color: #fff; opacity: .9; }
+
+.lo-btn-ghost { border-color: transparent; color: var(--lo-fg-muted); }
+
+/* ---------------------------------------------------------------- 视图切换
+ * 只靠 body 的 data-view 属性控制，不删 DOM。
+ * 这样切回首页再进来，编辑器实例和内存里的 file 都还在。
+ */
+.lo-main { position: relative; overflow: hidden; }
+
+body[data-view='home'] #view-editor { display: none; }
+body[data-view='editor'] #view-home { display: none; }
+
+.lo-view { height: 100%; overflow: auto; }
+
+/* ---------------------------------------------------------------- 首页 */
+.lo-home-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 56px 24px;
+}
+
+.lo-home-title {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 650;
+  letter-spacing: -.4px;
+}
+
+.lo-home-sub {
+  margin: -20px 0 0;
+  color: var(--lo-fg-muted);
+  font-size: 13px;
+}
+
+.lo-dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 36px 24px;
+  border: 1.5px dashed var(--lo-line);
+  border-radius: 14px;
+  background: var(--lo-bg-soft);
+  text-align: center;
+}
+
+.lo-dropzone-main { margin: 0; color: var(--lo-fg-muted); }
+.lo-dropzone-hint { margin: 4px 0 0; color: var(--lo-fg-muted); font-size: 12px; }
+
+.lo-recents-title {
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--lo-fg-muted);
+}
+
+.lo-recents-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.lo-recents-empty {
+  margin: 0;
+  padding: 14px;
+  border: 1px solid var(--lo-line);
+  border-radius: var(--lo-radius);
+  color: var(--lo-fg-muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+.lo-recent-item {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  margin-bottom: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--lo-line);
+  border-radius: var(--lo-radius);
+  background: var(--lo-bg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.lo-recent-item:hover { border-color: var(--lo-accent); }
+
+.lo-recent-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lo-recent-meta { margin-left: auto; color: var(--lo-fg-muted); font-size: 12px; }
+
+/* ---------------------------------------------------------------- 编辑器 */
+.lo-editor { display: flex; flex-direction: column; }
+
+.lo-editor-host { flex: 1; min-height: 0; display: flex; }
+
+.lo-editor-empty {
+  margin: auto;
+  color: var(--lo-fg-muted);
+}
+
+/* 有会话时隐藏空态、没会话时隐藏挂载区（由 views/editor.js 设 hidden 属性）。
+   注意必须显式写这两条：.lo-editor-host 有 display:flex，会覆盖 [hidden] 的默认样式。 */
+.lo-editor-host[hidden] { display: none; }
+.lo-editor-empty[hidden] { display: none; }
+
+/* CodeMirror 或 textarea 都塞在这个容器里 */
+.lo-md { display: flex; flex: 1; min-height: 0; }
+
+.lo-md-input {
+  flex: 1;
+  width: 100%;
+  padding: 24px 28px;
+  border: 0;
+  outline: none;
+  resize: none;
+  color: inherit;
+  background: var(--lo-bg);
+  font: 13px/1.75 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* ---------------------------------------------------------------- 状态栏 */
+.lo-statusbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 14px;
+  border-top: 1px solid var(--lo-line);
+  color: var(--lo-fg-muted);
+  font-size: 12px;
+}
+
+.lo-status-text { margin-right: auto; }
+.lo-status-text[data-tone='warn'] { color: var(--lo-warn); }
+.lo-status-text[data-tone='error'] { color: var(--lo-error); }
+
+/* ---------------------------------------------------------------- 拖拽提示 */
+.lo-dropmask {
+  position: fixed;
+  inset: 0;
+  display: none;
+  place-items: center;
+  z-index: 20;
+  border: 3px dashed var(--lo-accent);
+  background: rgba(47, 111, 237, .08);
+  color: var(--lo-accent);
+  font-size: 16px;
+  pointer-events: none;
+}
+
+body.lo-dragging .lo-dropmask { display: grid; }

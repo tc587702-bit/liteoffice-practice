@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LiteOffice</title>
+  <link rel="stylesheet" href="styles/app.css" />
+  <link rel="stylesheet" href="styles/print.css" />
+</head>
+
+<!--
+  data-view 控制显示哪个视图（home / editor），由 js/main.js 的 refresh() 写入。
+  用属性切换而不是删 DOM：切回首页时编辑器实例还在，file 对象不会丢，
+  因此不需要 window.name / IndexedDB 那套跨页传文件的 hack。
+-->
+<body data-view="home">
+
+  <header class="lo-toolbar" id="toolbar">
+    <!-- 内容由 js/shell/toolbar.js 生成 -->
+  </header>
+
+  <main class="lo-main">
+    <!-- ========== 首页 ========== -->
+    <section id="view-home" class="lo-view lo-home">
+      <div class="lo-home-inner">
+        <h1 class="lo-home-title">LiteOffice</h1>
+        <p class="lo-home-sub">本地优先的轻量文档工作台 · 文件不离开你的设备</p>
+
+        <div class="lo-dropzone" data-role="dropzone">
+          <p class="lo-dropzone-main">把文件拖进来，或</p>
+          <button class="lo-btn lo-btn-primary" data-act="pick" type="button">选择文件</button>
+          <p class="lo-dropzone-hint">docx · xlsx · pptx · md · pdf</p>
+        </div>
+
+        <div class="lo-recents">
+          <h2 class="lo-recents-title">最近打开</h2>
+          <ul class="lo-recents-list" data-role="recent"></ul>
+          <p class="lo-recents-empty" data-role="recent-empty">还没有打开过文件</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== 编辑器 ========== -->
+    <section id="view-editor" class="lo-view lo-editor">
+      <!-- 会话（DocumentSession）通过 mount() 挂到这里 -->
+      <div class="lo-editor-host" data-role="editor-host"></div>
+      <p class="lo-editor-empty" data-role="editor-empty">还没有打开文件</p>
+    </section>
+  </main>
+
+  <footer class="lo-statusbar" id="statusbar">
+    <!-- 内容由 js/shell/statusbar.js 生成 -->
+  </footer>
+
+  <!-- 拖拽时的全屏提示层 -->
+  <div class="lo-dropmask" aria-hidden="true">松开即可打开 · 不会上传</div>
+
+  <!-- 复用一个隐藏的 input，避免每次选文件都新建 DOM -->
+  <input type="file" id="file-input" accept=".md,.markdown,.docx,.xlsx,.pptx,.pdf" hidden />
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

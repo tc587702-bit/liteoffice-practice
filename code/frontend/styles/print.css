@@ -1,0 +1,58 @@
+/*
+ * print.css —— 只放打印相关样式
+ * 谁调用：index.html 直接 <link> 引入
+ *
+ * 铁律（对应规划 2.4-5）：
+ *   所有规则必须挂在 body[data-printing='md'] 之下，
+ *   禁止写裸的 @media print { .lo-toolbar { display:none } }，
+ *   否则将来把 Office iframe 放进来时，会把不该隐藏的东西也隐藏掉。
+ *
+ * 现状：md 内核当前是 textarea，还没有渲染视图，
+ *      所以 MarkdownSession.caps.printable = false，
+ *      「导出 PDF」按钮保持灰色。等 Day 2 接上 markdown 渲染后启用。
+ */
+
+@media print {
+  @page {
+    size: A4;
+    margin: 18mm 16mm;
+  }
+
+  /* 只留正文 */
+  body[data-printing='md'] .lo-toolbar,
+  body[data-printing='md'] .lo-statusbar,
+  body[data-printing='md'] .lo-dropmask {
+    display: none !important;
+  }
+
+  body[data-printing='md'] .lo-main {
+    overflow: visible;
+  }
+
+  /* 正文用开源字体，避免嵌入商业字体 */
+  body[data-printing='md'] .lo-md-input {
+    padding: 0;
+    border: 0;
+    font-family: "Noto Serif CJK SC", "Songti SC", serif;
+    font-size: 11pt;
+    line-height: 1.65;
+    color: #000;
+    background: none;
+  }
+
+  /* 代码块/表格/图片不跨页切断，标题不孤行（渲染视图接上后生效） */
+  body[data-printing='md'] pre,
+  body[data-printing='md'] table,
+  body[data-printing='md'] img,
+  body[data-printing='md'] blockquote {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  body[data-printing='md'] h1,
+  body[data-printing='md'] h2,
+  body[data-printing='md'] h3 {
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+}
