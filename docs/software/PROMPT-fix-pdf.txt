@@ -1,0 +1,123 @@
+LiteOffice Vue 修复任务书
+
+版本 v1.0   日期 2026-10-24
+对象：墨刀生成的 liteoffice-vue 工程（/workspaces/2026-10-24/069f9dec-...）
+原则：只修下面三处，其余一律不许动。已验收通过的部分任何改动都视为回归。
+
+
+【冻结区：以下已实测通过，禁止改动】
+
+  技术栈与依赖
+    name = liteoffice-vue
+    dependencies: vue / vue-router / pinia / xlsx        （保持 4 个）
+    devDependencies: vite / @vitejs/plugin-vue / typescript / vue-tsc /
+                     tailwindcss / postcss / autoprefixer（保持 7 个）
+
+  已验收通过的实现（不要重构）
+    lib/docx.ts        698 行：实测 84 块 / 4016 字 / 7 张图（均 data URL）/ 2 表 / 编号正确
+    lib/markdown.ts    325 行：实测 <script> 与 onerror 均被转义，javascript: 链接被剥掉
+    lib/zip.ts         196 行
+    lib/xml.ts          90 行
+    lib/file.ts        131 行：实测 GBK 判定 gb18030 正确
+    lib/exporter.ts    189 行：导出结构不动
+    index.css / tailwind.config.js：深色令牌已落地（#303032 / #0A84FF / #F5F5F7 等）
+    pages/Home.vue、pages/Editor.vue 的整体结构
+
+  构建现状（必须保持）
+    vue-tsc --noEmit 零错误
+    vite build 通过，dist 0.62 MB，资源为相对路径 ./assets/...
+
+
+【问题 1：PDF 提取完全失效（必须修）】
+
+  证据（四个真实文件，均为 Word 导出的文本型 PDF，不是扫描件）
+    chk.pdf          373 KB，含 115 个 /Font、19 个 /ToUnicode  → 提取 0 字符
+    margin_test.pdf  11 KB                                    → 提取 0 字符
+    re2.pdf          292 KB                                   → 提取 0 字符
+    re_tmp.pdf       364 KB                                   → 提取 0 字符
+    四个都返回 method=none，提示"可能是扫描件或使用了不可提取的文字编码"
+
+  判断
+    lib/pdf.ts 的自研解析器处理不了真实 PDF 的交叉引用流、对象流、CID 字体。
+    自研方案在这个体量上不成立，放弃。
+
+  要求
+    1. 改用 pdfjs-dist（npm 安装，版本写已发布的稳定版或 latest）
+    2. worker 必须本地打包，禁止任何 CDN 或远程地址：
+       用 new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url) 交给 Vite 处理
+    3. 先做文本提取（getTextContent），有文字层就按页输出文本
+    4. 再渲染页面 canvas（可懒加载，只渲染可见页）
+    5. 失败必须区分原因并给人话提示：
+         无文字层        → "这是扫描件，暂不支持 OCR"
+         加密            → "PDF 已加密，请先解除密码保护"
+         文件损坏        → "PDF 结构异常，无法解析"
+         其他            → 给出具体错误
+    6. 禁止静默返回空字符串
+
+  验收（交付时必须给出实测数字）
+    对上述四个文件分别报告：页数 / 提取字符数 / 首行文本 / 耗时(ms)
+    chk.pdf 至少提取 1000 字符；不得出现"0 字符且无原因"
+
+
+【问题 2：xlsx 大文件回退路径不可用（必须修）】
+
+  证据
+    大型工作簿.xlsx（6.7 MB，约百万单元格）
+    内置回退解析器耗时 27015 ms，且静默截断到 4000 行，只给一句 warning
+    界面在这 27 秒内没有任何进度反馈
+
+  要求
+    1. SheetJS 主路径保持不动
+    2. 回退路径加前置保护：文件 > 2 MB 或估算行数 > 20000 时，
+       先提示"文件较大，将只加载前 20000 行"，用户确认后再解析
+    3. 解析期间必须有等待态（进度或至少"正在解析 N 秒"），不许界面假死
+    4. 超过 5 秒未完成要给出可取消入口
+    5. 截断必须显式标注："已截断，仅显示前 N 行（共 M 行）"
+
+  验收
+    6.7 MB 文件：要么 5 秒内给出前 20000 行并显式标注已截断，
+    要么在 1 秒内直接提示过大并给出替代方案；不允许 27 秒白屏无反馈
+
+
+【问题 3：三项能力必须自证（不是"已实现"就算）】
+
+  3.1 编辑后导出回读一致
+      步骤：打开一个 docx → 修改首段文字 → 导出 → 用 parseDocx 读回
+      要求：段落数一致、首段文字一致；不一致必须报错，不许静默成功
+
+  3.2 IndexedDB 刷新恢复
+      步骤：打开 2 个文件（其中一个是 md）→ 修改内容 → F5 刷新
+      要求：会话列表与编辑内容都恢复；配额不足时降级提示，不许崩溃
+
+  3.3 UI 与冻结基准一致
+      逐项给出实际值（不要写"已按规范"）：
+        首页 Hero 卡片背景色        （应为 #303032）
+        卡片圆角                    （应为 24px）
+        主按钮背景色 / 阴影         （#0A84FF / 0 4px 16px rgba(10,132,255,0.3)）
+        次级按钮背景                （#3A3A3C）
+        顶栏背景与模糊              （rgba(28,28,30,0.75) + blur(20px)）
+        正文与副标题色              （#F5F5F7 / #98989D）
+        主要间距                    （8/16/24/32/48 的倍数）
+      另外说明：与 docs/prototype/index.html 相比，哪些地方做不到一致，如实列出
+
+
+【交付物】
+
+  1. 改动文件清单（只列改过的，不要贴全文）
+  2. npm run build 的原始日志（不许节选）
+  3. vue-tsc --noEmit 结果（必须零错误）
+  4. grep -rn "modao.cc" src/ 的结果（必须 0 条）
+  5. grep -c '"react"' package.json（必须 0）
+  6. dependencies 与 devDependencies 完整列表
+  7. 问题 1 / 2 / 3 的全部实测数字
+  8. 新增的已知限制（例如大文件、扫描件 PDF）
+
+
+【禁止事项】
+
+  - 不要重构已通过的模块（docx / markdown / zip / xml / file / exporter）
+  - 不要引入任何 UI 组件库、图标库、动画库
+  - 不要改主题色值、圆角、间距体系
+  - 不要把 pdf.js 的 worker 指向任何远程地址
+  - 不要用示例数据或假数据冒充解析结果
+  - 不要交付 build 未通过的版本

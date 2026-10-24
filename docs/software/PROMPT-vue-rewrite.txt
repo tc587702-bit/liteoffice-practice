@@ -1,0 +1,316 @@
+LiteOffice Vue 重写任务书
+
+版本 v1.1   日期 2026-10-24
+用途：交给代码生成工具（墨刀 AI / 其他）执行
+冻结基准：docs/prototype/index.html、docs/prototype/editor.html
+（墨刀产物，只读，不修改任何一行）
+
+修订记录
+  v1.0  初版
+  v1.1  新增「前置声明」「依赖白名单与版本」「生成后自证」三节
+        原因：v1.0 生成结果跑偏为 React 项目、未装解析库、版本号臆造、
+        主题变浅色，故把否定式约束改为白名单 + 自证清单
+
+
+0. 前置声明（违反任一条直接重做，不要交付）
+
+  这是一个 Vue 3 项目，不是 React 项目。
+
+  上一轮失败记录（务必避免重演）：
+    - 产出为 React 工程：package.json 的 name 写成 react-project，
+      依赖含 react / react-dom / react-router-dom / zustand
+    - 未安装 docx / xlsx / pdfjs-dist 三个必需解析库
+    - 额外引入 antd / @mui/material / @arco-design / @radix-ui /
+      tdesign-react / framer-motion / recharts 等 20 余个无关 UI 库
+    - 版本号臆造：typescript ^6.0.2、vite ^8.0.2、lucide-react ^1.6.0，
+      npm install 必然失败
+    - generation_meta 里 appearance_mode=light、背景 #ffffff、主色 #2563eb，
+      与要求的纯黑 + #303032 + #0A84FF 完全相反
+
+  本次硬性判定：
+    - package.json 中不得出现 react、react-dom、react-router-dom、zustand、
+      antd、@mui/*、@arco-design/*、@radix-ui/*、tdesign-*、
+      framer-motion、recharts
+    - src 下不得出现 .tsx / .jsx 文件
+    - 出现上述任一，立即停止并重做
+
+
+1. 不可变清单（最高优先级）
+
+以下内容必须与墨刀产物完全一致，任何"优化""简化""重新设计"都视为不合格。
+
+  文案
+    所有标题、副标题、按钮文字、提示语、空状态文案、标签文字，
+    逐字一致，不新增不删除。
+
+  布局
+    三栏结构、顶栏 68px、Hero 卡 60/40 双列、底部四格通栏、间距数值，全部保持。
+
+  颜色
+    背景纯黑 + 蓝紫径向光晕（透明度 0.07-0.09）
+    卡片 #303032
+    主按钮 #0A84FF
+    次级按钮 #3A3A3C
+    文字 #F5F5F7 / #98989D / #A1A1A6 / #636366
+    不得调色。
+
+  圆角
+    卡片 24px、格式胶囊 8px、主按钮全圆角药丸，不得改成其他值。
+
+  描边
+    1px solid rgba(255,255,255,0.08)
+    分割线 rgba(255,255,255,0.06)
+    不得出现实色硬线。
+
+  模糊
+    顶栏 / 侧栏 rgba(28,28,30,0.75) + backdrop-filter: blur(20px)，含 -webkit- 前缀。
+
+  动效
+    入场错峰上浮、鼠标聚光灯 300px、按压 scale(0.96) +
+    cubic-bezier(0.34,1.56,0.64,1)、数字老虎机、呼吸动画 0.012-0.045、
+    光晕 20s 游走 —— 参数不得改动。
+
+  图标
+    线框风格、尺寸、位置、颜色（选中 #0A84FF）保持一致。
+
+  字体
+    -apple-system, "PingFang SC", sans-serif
+    开启 -webkit-font-smoothing: antialiased
+
+执行方式：
+  先原样复制现有 HTML 的 DOM 结构与 Tailwind 类名，
+  再把类名逐个替换为等价写法，最后才挂 Vue 响应式。
+  禁止先重画再对比。
+
+
+2. 工程结构
+
+  技术栈：Vue 3 + Vite + TypeScript + vue-router + Pinia，不要 React
+  路由：  / 首页，/editor 编辑页
+  样式：  内联 CSS 抽成 SFC scoped 样式或独立 CSS 模块，不留大段内联 style
+  脚本：  拆成 composable：useFileImport / useDocSession / useDocParse /
+          useDocExport / useToast
+  解析：  parseDocx / parseXlsx / parsePptx / renderPdfPages
+          只搬位置 + 改 ES module 导出，不得重写算法，不得改变解析行为
+  依赖：  仅 docx、xlsx(SheetJS)、pdfjs-dist
+          不要 jszip（现用原生 DecompressionStream）
+          不要 mammoth（现有代码没用它）
+  跨页：  去掉 window.name，改 Pinia store + IndexedDB 数据层；
+          路由只传文件 id，不传字节
+  产出：  npm install / npm run dev / npm run build 三者必须全通
+
+2.1 Tailwind 配置（缺这条会整片丢样式）
+
+  npm 版 Tailwind 会 purge 未扫描的类，bg-[#303032] 这类任意值类会直接消失。
+  tailwind.config.js 必须写：
+
+    content: ['./index.html', './src/**/*.{vue,ts}']
+
+  验收方式：npm run build 后打开 dist/index.html，
+  首页 Hero 卡片背景必须是 #303032；若呈透明，说明 content 配错。
+
+2.2 依赖白名单与版本策略
+
+  dependencies 只允许这 6 个（多一个都不要）：
+    vue
+    vue-router
+    pinia
+    docx
+    xlsx
+    pdfjs-dist
+
+  devDependencies 只允许这 7 个：
+    vite
+    @vitejs/plugin-vue
+    typescript
+    vue-tsc
+    tailwindcss
+    postcss
+    autoprefixer
+
+  版本策略：
+    只写已发布的稳定版本；不确定就写 latest，禁止臆造大版本号
+    （上一轮写 typescript ^6.0.2、vite ^8.0.2、lucide-react ^1.6.0，均不存在）
+    npm install 必须一次成功；失败就降级为最小工程
+    （先只有 vue + vite + typescript 跑通，再逐个加解析库）
+
+  明确不需要的：
+    任何组件库（antd / MUI / Arco / TDesign / Radix）
+    任何动画库（framer-motion）、图表库（recharts）、图标库（lucide-react）
+    图标一律用内联 SVG 手写，不为几个图标装一个库
+
+
+3. 首页规格
+
+  顶栏
+    左：LO + LiteOffice + 副标题"文件不上传 · 浏览器内编辑"（非斜体、端正黑体）
+    右："打开文件"主按钮 + "保存下载" + 状态文案"还没有打开文件"
+
+  左侧导航（三项，flex 垂直居中，带线框图标）
+    本地文档：选中态，背景 rgba(255,255,255,0.08)，图标 #0A84FF，文字纯白
+    AI 助手：浅灰文字 + #636366"预留"小标签
+    云端工作区：cloud 线框图标 + 预留标签；
+              点击弹 Toast"云端工作区正在开发中，目前请使用本地安全模式"，
+              且不得夺走选中态
+    导航下方一条极细分割线，再下面小号灰字"当前会话：暂无文件"（有文件时显示真实数量）
+    侧栏底部"仅在本地处理" + "预览编辑器界面"蓝色链接
+
+  Hero 主卡片（CSS Grid 60% / 40%）
+    左列：标题"打开一个文档"
+          副标题"拖进窗口，或点顶部「打开文件」"（上间距 12-16px）
+          蓝色药丸主按钮（上间距 32px）
+          按钮下方格式胶囊 docx / xlsx / pptx / md / pdf
+          （背景 rgba(255,255,255,0.06)，文字 #A1A1A6，圆角 8px，内边距 4px 8px，横排）
+    右列：与左列等高的虚线拖拽框，1px dashed rgba(255,255,255,0.12)、圆角 24px
+          框内居中上传图标（#0A84FF，底 rgba(10,132,255,0.15)）+ 文字"或拖入文件"
+          拖入时虚线变蓝变实 + 微弱蓝色径向渐变 + 图标浮动，
+          另有呼吸动画（背景明暗在 0.012 与 0.045 间交替）
+
+  底部隐私通栏（与主卡片同宽）
+    1x4 横向等距 flex，四格：本地处理 / 0次上传 / 无广告追踪 / 极速响应
+    每格左侧浅灰底板小图标 + 右侧短标题与极简副标题
+    首格数字 0 为 24px / 600 / #FFFFFF，"次上传"14px 浅灰
+    悬停 translateY(-2px) + border-color rgba(255,255,255,0.15) + transition all 0.2s ease
+
+  动效
+    入场从 translateY(20px)、opacity 0 错峰上浮（ease-out，只播一次）
+    主卡片鼠标跟随聚光灯 radial-gradient(300px circle, rgba(255,255,255,0.05), transparent)
+    按钮悬停轻微变亮、按下 scale(0.96)、松开弹性回弹 cubic-bezier(0.34,1.56,0.64,1)
+    顶部会话数字与"0 次上传"加载时老虎机式从 9 滚到真实值
+    以上动效必须用 Vue 响应式状态 + 类绑定实现，
+    不得直接改 DOM 或写内联 style
+    prefers-reduced-motion 下全部降级为静态
+
+
+4. 编辑页规格
+
+  同一套顶栏与侧栏，右侧为文档编辑区。
+
+  必须真实可用
+    文件内容渲染进可编辑区域
+    工具栏真实作用：加粗 / 斜体 / 下划线 / 标题 / 列表
+    撤销重做、字数统计、文档大纲跳转、阅读模式、未保存标记
+
+  保存下载必须写入编辑结果
+    md：导出编辑后的文本
+    xlsx：SheetJS 回写，保留工作表名
+    docx：docx 库回写，保留标题层级、列表、表格
+    pptx / pdf：无法回写时必须明确提示"该格式暂不支持回写编辑结果"，
+               允许导出文本/HTML 副本或下载原始文件；
+               禁止静默导出与编辑结果不符的文件
+
+
+5. 文件能力（真实数据，禁止示例）
+
+  按钮选择 + 整页拖拽 + 拖拽框，三条入口都能导入本机真实文件：
+  docx / xlsx / pptx / md / pdf
+
+  会话列表显示真实文件名、大小、格式；可多文件、可切换、可移除；
+  切换不同文件时内容绝对不能串
+
+  解析防御性
+    XML 节点的 children 可能不是数组（undefined / 单节点 / 字符串），
+    一律归一化为数组再处理
+    单个节点解析失败只跳过该节点，并提示"部分内容无法解析，已展示可读部分"
+    不允许整份文档报错，不允许白屏，不允许静默失败
+
+  会话与编辑内容用 IndexedDB 持久化，刷新后恢复
+  大文件写入需 try/catch，配额不足时降级提示，不得崩溃
+
+
+6. 补充硬要求（原需求未覆盖，但缺了会验收失败）
+
+6.1 docx 内嵌图片必须渲染
+    w:drawing → a:blip 的 r:embed → word/_rels/document.xml.rels
+    → word/media/* → 按扩展名定 MIME → base64 data URL → img 标签
+    尺寸：wp:extent 的 cx/cy（EMU）÷ 9525 → px
+    不支持的格式（emf/wmf）显示占位，不报错
+
+6.2 有序列表必须还原编号
+    w:numPr 的 numId + ilvl → word/numbering.xml 的 abstractNum → lvl
+    → numFmt（decimal / lowerLetter / lowerRoman 等）+ lvlText + start
+    → 输出 1. 2. 3.，不得一律显示成圆点
+
+6.3 导出必须自检
+    导出后检查 ZIP 头为 PK\x03\x04
+    再用自身 parseDocx 读回，比对段落数与首段文字
+    不一致即报错，禁止静默成功
+
+6.4 文本解码
+    UTF-8 优先
+    严格解码失败时回退 gb18030（旧记事本保存的 md 是 GBK）
+    单文件上限 4 MB，超出截断并提示
+
+6.5 性能与体积门槛
+    dist 产物 ≤ 2 MB（含 pdf worker 可放宽到 4 MB）
+    首屏到正文可读 ≤ 1 秒（本机、1 MB docx、清缓存）
+    禁止任何 CDN / 外链，Network 域名只能是 localhost
+    不得提交 node_modules/、dist/、public/onlyoffice/
+
+6.6 安全
+    md 与 docx 文本渲染必须转义，禁止用 v-html 直出未转义内容
+    md 内的 script、onerror 不得执行
+
+
+7. 交付物
+
+  1. zip 包（不含 node_modules / dist）
+  2. 完整文件树
+  3. npm run build 的原始输出日志（不得美化或节选）
+  4. vue-tsc --noEmit 结果：要求零错误，有错必须逐条列出
+  5. 已知限制清单：哪些格式不支持回写、哪些结构不渲染
+
+
+7.1 生成后自证（先逐条回答，回答不出来的项视为未完成）
+
+  1. package.json 里全部 dependencies 列出来，逐个说明用途
+  2. 里面有 react / react-dom / antd / @mui / @radix-ui / zustand 吗？
+     有任何一个，重做
+  3. docx、xlsx、pdfjs-dist 是否都在 dependencies 里？
+     缺一个，重做
+  4. src 下有没有 .tsx / .jsx 文件？有就重做（这是 Vue 项目）
+  5. parseDocx / parseXlsx / renderPdfPages 分别在哪个文件、第几行？
+     找不到，说明解析没搬过来
+  6. npm install 成功了吗？失败原因是什么？
+  7. npm run build 成功了吗？把原始日志贴出来（不许节选）
+  8. vue-tsc --noEmit 是否零错误？有错逐条列出
+  9. dist 体积多少？首屏打开耗时多少？怎么测的？
+  10. Network 里有没有非 localhost 的请求？
+  11. 与冻结基准相比，哪些地方做不到 1:1？如实列出，不要隐瞒
+  12. 有没有用示例数据/假数据冒充真实解析？没有才回答"没有"
+
+
+8. 验收清单（逐项打勾，缺一项即不通过）
+
+  1  文案与墨刀版逐字一致                  全文 diff，无增删改
+  2  颜色/圆角/间距/模糊与冻结值一致        抽查 10 处，逐项比数值
+  3  Tailwind 未 purge 任意值类            首页卡片背景为 #303032
+  4  路由 / 与 /editor 均可用，刷新不 404   直接访问两个 URL
+  5  真实 docx 渲染：文字、标题、表格、图片、有序列表编号
+                                            用带图带表的 docx 实测
+  6  真实 xlsx 渲染：多工作表、单元格类型    用真实表格实测
+  7  真实 pdf 渲染：多页                    用 3 页 pdf 实测
+  8  真实 md 渲染：标题/列表/代码块/表格；GBK 不乱码
+                                            UTF-8 与 GBK 各一份
+  9  编辑后导出，回读内容与编辑结果一致      改首段 → 导出 → 重新打开比对
+  10 pptx/pdf 导出时明确提示不支持回写      观察提示文案
+  11 多文件切换不串内容                     三个文件来回切 3 轮
+  12 畸形文件不崩溃、不白屏，有可读提示      拖入改名的 txt、截断的 docx
+  13 刷新后会话恢复（IndexedDB）            打开 2 个文件后 F5
+  14 首屏 ≤ 1 秒，dist ≤ 2 MB              计时 + 看体积
+  15 Network 无外部域名                     DevTools 过滤
+  16 prefers-reduced-motion 下无动画        系统设置开启后复看
+  17 vue-tsc 零错误，构建通过               看日志
+
+
+9. 与现有代码的关系
+
+  docs/prototype/ 是冻结基准，只读。新工程另开目录，不改动它。
+
+  现有 code/frontend/（Vue + ONLYOFFICE，39 个文件）与本任务的关系必须明确：
+    若本任务产出被采纳为主线，现有实现归档，
+    并同步修改 README.md、docs/requirements/functional_spec.md、
+    docs/requirements/user_stories.md 中关于 ONLYOFFICE 的表述；
+    否则两套并存，必须在 README 写清"哪套是交付物"。
+
+  本项目代码由 AI 生成，仓库需保留来源说明与 AI 生成标识。
