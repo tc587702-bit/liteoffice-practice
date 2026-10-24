@@ -152,3 +152,6 @@ code/core_engine/build/
 code/core_engine/dist/
 code/core_engine/bench/out/fixtures/
 code/core_engine/**/__pycache__/
+
+# 构建临时目录（sync-frontend.mjs 用）
+.tmp/
