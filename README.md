@@ -6,17 +6,17 @@
 
 **当前进度（Day 1）**：外壳骨架 + md 闭环（打开 / 编辑 / 保存）已通；Office 格式待 Day 2 接入 ONLYOFFICE。
 
-## 运行（零构建，不需要 npm 依赖）
+## 运行（零构建，不需要安装任何依赖）
 
 ```bash
-# 任选一种起静态服务（不要直接双击 index.html，file:// 下模块加载会被浏览器拦）
 pnpm serve
-# 或
+# 或不用 pnpm：
 python3 -m http.server 5191 --directory code/frontend
 
-# 浏览器打开
-open http://127.0.0.1:5191
+# 然后浏览器打开 http://127.0.0.1:5191
 ```
+
+> 不要直接双击 `index.html`：`file://` 协议下浏览器会拦截 ES module 加载。
 
 只有构建**桌面版**时才需要 Rust（`curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`）。
 
@@ -24,12 +24,12 @@ open http://127.0.0.1:5191
 
 | 命令 | 作用 |
 |---|---|
-| `pnpm serve` | 起静态服务器（5191 端口） |
-| `bash bootstrap.sh` | 检查 Node 版本、拉取 Office 内核产物（Day 2 起需要） |
-| `bash bootstrap.sh --no-engine` | 同上，跳过 342 MB 内核产物 |
-| `pnpm engine` | 单独拉取 Office 内核产物 |
+| `pnpm serve` | 起静态服务器（127.0.0.1:5191） |
+| `pnpm check` | 用 Node 检查所有 `.js` 的语法 |
+| `pnpm engine` | 拉取 Office 内核产物（Day 2 起需要） |
+| `bash bootstrap.sh --no-engine` | 检查环境，跳过 342 MB 内核产物 |
 
-## 目录
+## 仓库结构
 
 ```text
 code/frontend    零构建前端：index.html + styles/ + js/（core 会话与文件通道、shell 界面、views 视图）
@@ -39,14 +39,20 @@ tests/           单测与多格式回归
 docs/            需求、架构、代码导读、进度、复盘
 ```
 
+目录结构沿用课程模板（`code/` `tests/` `docs/`），**根目录只多出下面这些工程配置文件**：
+
+| 根目录文件 | 作用 | 删掉会怎样 |
+|---|---|---|
+| `package.json` | 任务快捷方式（`serve` / `check` / `engine`）+ Node/pnpm 版本锁定（`engines` / `packageManager`） | 得手敲 `python3 -m http.server ...` |
+| `.nvmrc` | 声明 Node 20，`nvm use` 自动切换 | 可能用 Node 18/22 跑出奇怪的错 |
+| `rust-toolchain.toml` | Rust 版本锚点（Day 2 起构建桌面版才用） | 各人编译出的产物不一致 |
+| `bootstrap.sh` | 新机器一条命令检查环境 + 拉内核产物 | 新人上手要照文档手敲 |
+| `.gitignore` | 排除 `node_modules/`、内核产物、编译产物 | 342 MB 字体可能被误提交 |
+
+**没有 `node_modules`、没有 lockfile、没有构建步骤**——前端是浏览器直接跑的原生 ES module。
+
 刚接手的队友先读 **[docs/software/skeleton-walkthrough.md](docs/software/skeleton-walkthrough.md)**（20 分钟看懂主干）。
 目录归属见 [docs/software/repo_layout.md](docs/software/repo_layout.md)。
-
-## 环境约定
-
-- Node **20.x**（`.nvmrc`）；pnpm **12.15.0**（`package.json` 的 `packageManager`，由 corepack 获取）
-- 前端**没有 npm 依赖**，用浏览器原生 ES module，改完刷新即可
-- Rust 版本见 `rust-toolchain.toml`，首次 `cargo build` 成功后钉到具体版本
 
 ## 架构（一句话）
 

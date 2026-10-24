@@ -7,10 +7,11 @@ on:
 
 jobs:
   smoke:
-    # 关键：在 GitHub 的全新 Linux 机器上从零跑一次。
-    # 本项目是零构建（原生 ES module），所以 CI 只做两件事：
+    # 在 GitHub 的全新 Ubuntu 机器上从零跑一次，证明"别人也能跑"。
+    # 本项目前端零构建、零依赖，所以 CI 只做三件事：
     #   1. 所有 .js 语法检查（node --check）
-    #   2. 起一个静态服务器，确认首页能访问
+    #   2. 起静态服务器，确认首页和关键资源可访问
+    #   3. 检查提交里没有混进产物/大文件
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -35,6 +36,10 @@ jobs:
           curl -fsS http://127.0.0.1:5191/styles/app.css > /dev/null
           echo "静态资源全部可访问"
 
-      - name: 确认没有遗漏提交的 lockfile
+      - name: 确认没有产物混进仓库
         run: |
-          test -f pnpm-lock.yaml && echo "pnpm-lock.yaml 存在"
+          set -e
+          if git ls-files | grep -qE '^(node_modules|code/frontend/public/editor)/'; then
+            echo "产物被提交了，请检查 .gitignore"; exit 1
+          fi
+          echo "仓库干净"

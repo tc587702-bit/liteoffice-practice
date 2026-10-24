@@ -10,14 +10,7 @@
   "scripts": {
     "serve": "python3 -m http.server 5191 --directory code/frontend",
     "dev": "python3 -m http.server 5191 --directory code/frontend",
-    "check": "node --check code/frontend/js/main.js",
-    "bootstrap": "bash bootstrap.sh",
+    "check": "find code/frontend/js -name '*.js' -print0 | xargs -0 -n1 node --check && echo 'JS 语法全部通过'",
     "engine": "node code/core_engine/fetch-engine.mjs"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "esbuild",
-      "@tauri-apps/cli"
-    ]
   }
 }
