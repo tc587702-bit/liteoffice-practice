@@ -1,65 +1,82 @@
 # LiteOffice
 
-浏览器里打开、预览、编辑 Office 文档的轻量办公项目。**文件不上传到任何服务器**，全部在本地内存中完成。
+浏览器里打开、预览、编辑 Office 文档的轻量办公工具。**文件不上传到任何服务器**，全部在本地内存中完成。
 
-> 软件实践课程小组项目。本仓库包含两个可独立运行的子项目：只读内核与 Vue 前端。
+> 软件实践课程小组项目。本仓库只有一个可运行实现：`code/frontend/`。
 
 ---
 
-## 项目由两部分组成
+## 项目结构
 
-| 模块 | 位置 | 是什么 | 规模 |
-|---|---|---|---|
-| **只读内核** | [`code/core_engine/`](code/core_engine/) | 零依赖、零框架的文档解析内核，覆盖 29 种格式（OOXML / ODF / PDF / Markdown / CSV / RTF / EPUB 等），只读渲染 | 162 个文件，约 2.2 MB |
-| **Vue 前端** | [`code/frontend/`](code/frontend/) | 可交互的工作台：多格式预览 + ONLYOFFICE 编辑 + Markdown 预览，支持拖放与局域网访问 | 39 个源文件 |
+```
+liteoffice-practice/
+├── code/
+│   ├── frontend/          Vue 3 应用（唯一实现，44 个源文件）
+│   └── backend/           空 —— 本项目没有后端，这是隐私设计的一部分
+├── docs/
+│   ├── requirements/      问题定义、功能需求（38 条）、非功能需求、用户故事
+│   ├── mgmt/              沟通计划、风险计划、GitHub Projects 配置
+│   ├── assignments/       三次课程作业
+│   ├── software/          Vue 重写任务书、PDF 修复任务书
+│   └── prototype/         设计阶段交互原型（墨刀导出，只读基准）
+└── tests/                 预留
+```
 
-两者定位不同，**不是同一套代码的两个版本**：
-
-- 内核追求「零依赖、秒开、低内存」，用自研解析器直接产出统一文档模型（UDM），再渲染成 DOM。**只读，不能编辑。**
-- 前端追求「能改能存」，预览用 `@vue-office/*`，编辑用 ONLYOFFICE 的 WASM 内核，md 用自研解析器。**代价是首次加载约 199 MB。**
-
-`code/backend/` 为空 —— 本项目**没有后端**，这是隐私设计的一部分，不是没做完。
+`docs/prototype/` 是**冻结的设计基准**：UI 的配色、间距、动效以它为准，只读不修改。
 
 ---
 
 ## 快速开始
 
-### 跑 Vue 前端（主要交付物）
-
 ```bash
 cd code/frontend
-npm install          # 约 400 MB，含 ONLYOFFICE 编辑内核
-npm run setup        # 必需：补跑 @vue-office 的 postinstall + 复制编辑器静态资源
-npm run dev          # 默认 http://localhost:5190/
+npm install          # 5 个运行时依赖：vue / vue-router / pinia / xlsx / pdfjs-dist
+npm run dev          # 默认 http://localhost:5173/
+npm run build        # 类型检查 + 生产构建，产物在 dist/
+npm run typecheck    # vue-tsc --noEmit
 ```
 
-`npm run setup` 不能省。它做两件事，两件都容易踩坑：
+无需后端、无需环境变量、无需构建脚本以外的配置。
 
-1. 补跑 `@vue-office/*` 的 postinstall —— npm 11 起默认不执行 postinstall，不补跑会报 `Failed to resolve entry for package "@vue-office/docx"`
-2. 把 ONLYOFFICE 的 356 个静态文件（198 MB）从 `node_modules` 复制到 `public/onlyoffice` —— 这些文件不入库，必须本地生成
-
-### 跑只读内核
-
-```bash
-cd code/core_engine
-node tools/build.mjs      # 类型擦除构建（无 tsc、无打包器）
-node tools/serve.mjs      # http://127.0.0.1:5180/apps/web/
-node tools/test.mjs       # 全部测试
-```
-
-内核**不需要 `npm install`**，全仓库没有 dependencies。
+> 本项目**不使用** ONLYOFFICE：编辑能力由 `contenteditable` + 自研解析器实现，
+> 体积从 199 MB 降到 2 MB 级，代价是排版保真度低于专业内核。
 
 ---
 
-## 在线原型
+## 技术栈
 
-`docs/prototype/` 是设计阶段的交互原型（墨刀导出，AI 生成），纯静态：
+| 层 | 选型 |
+|---|---|
+| 框架 | Vue 3（`<script setup lang="ts">`）+ Vite + TypeScript |
+| 路由 / 状态 | vue-router + Pinia |
+| 样式 | TailwindCSS（深色设计令牌） |
+| 文档解析 | 自研：`docx.ts` / `xlsx.ts` / `markdown.ts` / `zip.ts` / `xml.ts` |
+| PDF | `pdfjs-dist`（worker 本地打包，不依赖 CDN） |
+| 持久化 | IndexedDB（会话与编辑内容，刷新可恢复） |
 
-- 本地看：起任意静态服务器，打开 `docs/prototype/index.html`
-- 在线看：仓库 Settings → Pages → Source 选 `Deploy from a branch` + `/docs`，之后访问
-  `https://<用户名>.github.io/liteoffice-practice/prototype/`
+依赖刻意收敛：运行时 5 个、开发时 7 个，没有 UI 组件库、图标库、动画库。
 
-原型与最终实现的差异：原型是深色主题、选完文件停在「文件就绪」页；实现是浅色主题、选完直接渲染正文。**原型不含真实解析能力**。
+---
+
+## 能力与边界
+
+**支持**
+
+| 格式 | 打开 | 编辑 | 导出 |
+|---|---|---|---|
+| docx | ✅ 标题/段落/表格/图片/有序列表 | ✅ | ✅ 回写 |
+| xlsx | ✅ 多工作表 | ✅ 单元格 | ✅ 回写（保留表名） |
+| md | ✅ 标题/列表/代码块/表格 | ✅ | ✅ 文本 |
+| pdf | ✅ 文本层 + canvas 渲染 | ❌ | 明确的「不支持回写」提示 |
+| pptx | ✅ 文本抽取 | ❌ | 明确的「不支持回写」提示 |
+
+**已知限制**
+
+- **PDF 只读**，且扫描件（无文字层）不支持 OCR，会明确提示
+- **pptx / pdf 无法回写**编辑结果，导出时明示，不静默产出不符的文件
+- 超大工作簿（>2 MB 或 >2 万行）只加载前 N 行并标注已截断
+- docx 编辑后导出是 HTML 重建，复杂排版（分栏、文本框、页眉页脚）会丢失
+- 手机窄屏未做自适应
 
 ---
 
@@ -67,42 +84,28 @@ node tools/test.mjs       # 全部测试
 
 | 文档 | 内容 |
 |---|---|
-| [文档索引](docs/README.md) | 全部文档的导航与阅读顺序 |
-| [问题定义（5W1H）](docs/requirements/problem_definition.md) | 为什么做、给谁用、如何实现 |
-| [功能需求规范](docs/requirements/functional_spec.md) | `FR-*` 需求 + 追溯矩阵 + 端到端验收场景 |
+| [文档索引](docs/README.md) | 全部文档导航与阅读顺序 |
+| [问题定义（5W1H）](docs/requirements/problem_definition.md) | 为什么做、给谁用 |
+| [功能需求规范](docs/requirements/functional_spec.md) | 38 条 `FR-*`（含 Markdown 与 AI 辅助）+ 追溯矩阵 + 7 个验收场景 |
 | [非功能需求规范](docs/requirements/nonfunctional_spec.md) | `NFR-*` 指标与实测值 |
-| [用户故事](docs/requirements/user_stories.md) | 8 条故事 + Gherkin 验收标准 + INVEST 自检 |
+| [用户故事](docs/requirements/user_stories.md) | 8 条故事 + Gherkin 验收 + INVEST 自检 |
 | [沟通管理计划](docs/mgmt/communication_mgmt_plan.md) | 干系人、沟通矩阵、会议节奏 |
 | [风险管理计划](docs/mgmt/risk_mgmt_plan.md) | 风险登记册与应急预案 |
-| [GitHub Projects 配置](docs/mgmt/github_projects_setup.md) | Kanban / Team planning / Bug tracker |
-| [贡献规范](CONTRIBUTING.md) | 分支、提交信息、PR 清单 |
 
 ---
 
-## 已知限制
+## AI 参与说明
 
-**只读内核**
+**本项目代码与文档由 AI 辅助生成**，人工负责需求提出、取舍决策、验收测试与问题定位。
 
-- 只读，不能编辑、不能导出
-- `svg` / `epub` 已登记但未安装读取器，界面会如实显示「未安装读取器」
-- 部分 pptx / pdf 细节算子仍有测试失败
+- 前端实现：AI 生成（Vue 3 工程），人工验收（构建、类型检查、真实文件解析实测）
+- 设计原型：墨刀 AI 生成，含「豆包AI」标识，按要求保留
+- 文档：AI 起草，人工补充实测数据与风险项
 
-**Vue 前端**
-
-- 编辑模式首次加载约 199 MB，慢网络需 1–3 分钟
-- 「保存下载」链路依赖编辑器导出按钮，**尚未在多环境下充分验证**
-- 字体合规未解决：`public/onlyoffice/fonts/` 含商业字体（等线、宋体、Arial 等），公开分发前必须替换为开源字体
-- Markdown 只读，不能编辑；有序列表会显示成圆点；图片不加载本地路径
-
-**原型**
-
-- AI 生成，含「豆包AI」标识，不得删除
-- 无真实解析能力，只是交互流程
+如需在课程/公开场合展示，请如实说明上述参与方式。
 
 ---
 
 ## 许可
 
-内核部分见 [code/core_engine/LICENSE](code/core_engine/LICENSE)（MIT）。
-
-ONLYOFFICE 及其静态资源遵循其自身许可，商业字体问题见上方「已知限制」。
+见 [LICENSE](LICENSE)。第三方组件遵循其自身许可（`pdfjs-dist` Apache-2.0、`xlsx` Apache-2.0、Vue MIT）。
