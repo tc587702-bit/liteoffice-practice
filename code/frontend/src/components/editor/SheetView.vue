@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useWorkspaceStore } from '../../stores/workspace'
 import type { DocRecord } from '../../lib/db'
 import type { PersistedSheet } from '../../lib/xlsx'
@@ -34,6 +34,58 @@ const rows = computed(() => {
 })
 
 const width = computed(() => Math.max(sheet.value?.totalCols ?? 0, 1))
+
+/* ---------------- 行虚拟化：20000 行 × 20 列不一次性建 40 万个 input ---------------- */
+const ROW_HEIGHT = 32
+const OVERSCAN = 8
+const scrollRef = ref<HTMLElement | null>(null)
+const scrollTop = ref(0)
+const viewportHeight = ref(560)
+let resizeObserver: ResizeObserver | null = null
+
+const startIndex = computed(() => Math.max(0, Math.floor(scrollTop.value / ROW_HEIGHT) - OVERSCAN))
+const visibleCount = computed(() => Math.ceil(viewportHeight.value / ROW_HEIGHT) + OVERSCAN * 2)
+const endIndex = computed(() => Math.min(rows.value.length, startIndex.value + visibleCount.value))
+const visibleRows = computed(() =>
+  rows.value.slice(startIndex.value, endIndex.value).map((row, offset) => ({
+    row,
+    index: startIndex.value + offset,
+  })),
+)
+const padTop = computed(() => startIndex.value * ROW_HEIGHT)
+const padBottom = computed(() => Math.max(0, (rows.value.length - endIndex.value) * ROW_HEIGHT))
+
+function onScroll() {
+  const el = scrollRef.value
+  if (!el) return
+  scrollTop.value = el.scrollTop
+  viewportHeight.value = el.clientHeight
+}
+
+function resetScroll() {
+  if (scrollRef.value) scrollRef.value.scrollTop = 0
+  scrollTop.value = 0
+}
+
+watch([activeSheet, query], () => resetScroll())
+
+onMounted(() => {
+  const el = scrollRef.value
+  if (el) {
+    viewportHeight.value = el.clientHeight
+    if (typeof ResizeObserver !== 'undefined') {
+      resizeObserver = new ResizeObserver(() => {
+        viewportHeight.value = el.clientHeight
+      })
+      resizeObserver.observe(el)
+    }
+  }
+})
+
+onBeforeUnmount(() => {
+  resizeObserver?.disconnect()
+  resizeObserver = null
+})
 
 function update(rowNumber: number, col: number, value: string) {
   store.updateCell(props.doc.id, activeSheet.value, rowNumber, col, value)
@@ -73,11 +125,7 @@ function truncationLabel(target: PersistedSheet) {
         </button>
       </div>
       <div class="flex items-center gap-2">
-        <input
-          v-model="query"
-          placeholder="筛选单元格内容"
-          class="lo-input h-8 w-44 px-2.5 text-[12px]"
-        />
+        <input v-model="query" placeholder="筛选单元格内容" class="lo-input h-8 w-44 px-2.5 text-[12px]" />
         <span class="text-[11.5px] tabular-nums text-[#636366]">
           {{ rows.length }} / {{ sheet.totalRows }} 行 · {{ sheet.totalCols }} 列
         </span>
@@ -90,7 +138,11 @@ function truncationLabel(target: PersistedSheet) {
       <span class="text-[#A1A1A6]">· 导出会按当前已加载的行回写，未加载的尾部数据不会写入</span>
     </p>
 
-    <div class="thin-scroll min-h-0 flex-1 overflow-auto rounded-xl border border-white/[0.07] bg-white">
+    <div
+      ref="scrollRef"
+      class="thin-scroll min-h-0 flex-1 overflow-auto rounded-xl border border-white/[0.07] bg-white"
+      @scroll.passive="onScroll"
+    >
       <table class="w-max min-w-full border-collapse text-[12.5px] text-[#1D1D1F]">
         <thead class="sticky top-0 z-10">
           <tr>
@@ -107,23 +159,38 @@ function truncationLabel(target: PersistedSheet) {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="row in rows" :key="row.r" class="even:bg-[#FAFAFB]">
+          <tr v-if="padTop > 0" aria-hidden="true">
+            <td :colspan="width + 1" :style="{ height: `${padTop}px`, padding: 0, border: 0 }" />
+          </tr>
+          <tr
+            v-for="entry in visibleRows"
+            :key="entry.row.r"
+            :class="entry.index % 2 === 1 ? 'bg-[#FAFAFB]' : ''"
+            :style="{ height: `${ROW_HEIGHT}px` }"
+          >
             <th
               class="sticky left-0 z-10 border-b border-r border-[#EDEDF0] bg-[#F7F7FA] px-2 py-1 text-[10.5px] font-normal tabular-nums text-[#98989D]"
             >
-              {{ row.r }}
+              {{ entry.row.r }}
             </th>
             <td v-for="col in width" :key="col" class="border-b border-r border-[#F0F0F3] p-0 align-top">
               <input
-                :value="cellValue(row.cells, col - 1)"
+                :value="cellValue(entry.row.cells, col - 1)"
                 class="h-8 w-full min-w-[110px] bg-transparent px-2 text-[12.5px] text-[#1D1D1F] outline-none focus:bg-[#EAF4FF] focus:ring-1 focus:ring-inset focus:ring-[#0A84FF]/60"
-                :aria-label="`${sheet.name} 第 ${row.r} 行 ${sheet.columns[col - 1] ?? col} 列`"
-                @input="update(row.r, col - 1, ($event.target as HTMLInputElement).value)"
+                :aria-label="`${sheet.name} 第 ${entry.row.r} 行 ${sheet.columns[col - 1] ?? col} 列`"
+                @input="update(entry.row.r, col - 1, ($event.target as HTMLInputElement).value)"
               />
             </td>
+          </tr>
+          <tr v-if="padBottom > 0" aria-hidden="true">
+            <td :colspan="width + 1" :style="{ height: `${padBottom}px`, padding: 0, border: 0 }" />
           </tr>
         </tbody>
       </table>
     </div>
+    <p class="text-[11px] text-[#636366]">
+      当前渲染 {{ visibleRows.length }} 行（滚动时按需渲染，共 {{ rows.length }} 行），避免一次性创建
+      {{ rows.length * width }} 个输入框导致卡顿
+    </p>
   </div>
 </template>

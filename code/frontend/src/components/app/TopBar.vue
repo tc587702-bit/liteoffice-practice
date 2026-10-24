@@ -26,7 +26,7 @@ const sessionCount = computed(() => docs.value.length)
 
 <template>
   <header
-    class="lo-glass flex h-16 shrink-0 items-center justify-between gap-4 border-b border-white/[0.06] px-5 md:px-7"
+    class="lo-glass flex h-16 shrink-0 items-center justify-between gap-4 border-b border-white/[0.06] px-6 lg:px-10"
   >
     <RouterLink
       to="/"

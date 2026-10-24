@@ -10,6 +10,7 @@ import {
   LARGE_XLSX_BYTES,
   inspectXlsxWorkbook,
   parseXlsx,
+  parseXlsxFallback,
   persistedFromSheet,
   setCell,
   sheetText,
@@ -69,6 +70,7 @@ async function buildRecord(
   file: File,
   signal: AbortSignal,
   onPhase: PhaseReporter,
+  mode: 'auto' | 'fast' = 'auto',
 ): Promise<{ record: DocRecord; notices: string[] }> {
   const kind: FileKind = detectKind(file.name)
   const notices: string[] = []
@@ -88,7 +90,8 @@ async function buildRecord(
   }
 
   try {
-    if (buffer.byteLength > MAX_FILE_BYTES) {
+    // 只有按文本解码的格式（md / 未知）受 4 MB 截断影响，二进制格式不截断
+    if (buffer.byteLength > MAX_FILE_BYTES && (kind === 'md' || kind === 'unknown')) {
       notices.push('文件超过 4 MB，已截断至 4 MB 以内处理')
     }
     switch (kind) {
@@ -116,15 +119,29 @@ async function buildRecord(
         break
       }
       case 'xlsx': {
-        onPhase('正在读取工作簿')
-        const parsed = await parseXlsx(buffer, {
+        onPhase(mode === 'fast' ? '正在快速读取工作簿（最多 20000 行）' : '正在读取工作簿')
+        const parseOptions = {
           maxRows: FALLBACK_MAX_ROWS,
           maxCells: FALLBACK_MAX_CELLS,
           signal,
-          onProgress: (progress) => {
+          onProgress: (progress: { done: number; total: number; sheet: string }) => {
             onPhase(`正在解析工作表 ${progress.done}/${progress.total}（${progress.sheet}）`)
           },
-        })
+        }
+        // 用户在「大文件」确认里选择继续时，走可截断、可中止、几十毫秒到几秒的内置解析器；
+        // 其余情况依旧是 SheetJS 主路径（未改动）。快速模式失败再回退到 SheetJS 兜底。
+        let parsed
+        if (mode === 'fast') {
+          try {
+            parsed = await parseXlsxFallback(buffer, [], parseOptions)
+          } catch (fastError) {
+            if ((fastError as Error)?.name === 'AbortError') throw fastError
+            notices.push('快速模式失败，已尝试用 SheetJS 重新读取')
+            parsed = await parseXlsx(buffer, parseOptions)
+          }
+        } else {
+          parsed = await parseXlsx(buffer, parseOptions)
+        }
         const sheets: PersistedSheet[] = parsed.sheets.map((sheet) => {
           const persisted = persistedFromSheet(sheet)
           // 主路径（SheetJS）同样按行数截断，这里统一补上显式标注，避免只留一句 warning
@@ -135,12 +152,12 @@ async function buildRecord(
         })
         record.sheets = sheets
         const truncated = sheets.filter((sheet) => sheet.truncated)
-        record.warnings = [
-          ...parsed.warnings,
-          ...truncated
-            .map((sheet) => (sheet.truncatedNote ? `「${sheet.name}」${sheet.truncatedNote}` : ''))
-            .filter(Boolean),
-        ].filter((warning, index, all) => all.indexOf(warning) === index)
+        const extraNotes = truncated
+          .map((sheet) => (sheet.truncatedNote ? `「${sheet.name}」${sheet.truncatedNote}` : ''))
+          .filter((note) => note && !parsed.warnings.some((warning) => warning.includes(sheetNoteTail(note))))
+        record.warnings = [...parsed.warnings, ...extraNotes].filter(
+          (warning, index, all) => all.indexOf(warning) === index,
+        )
         record.text = sheetText(sheets)
         break
       }
@@ -215,6 +232,12 @@ async function buildRecord(
 
   record.originalFile = buffer
   return { record, notices }
+}
+
+/** 取「已截断，仅显示前 N 行（共 M 行）」这段主体，用于与已有 warning 去重比对 */
+function sheetNoteTail(note: string): string {
+  const at = note.indexOf('已截断')
+  return at >= 0 ? note.slice(at) : note
 }
 
 /** 取出编辑区 HTML 中首个块级元素的文字（供导出自检比对「首段」）。 */
@@ -315,8 +338,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     pending?.resolve(value)
   }
 
-  /** 大工作簿前置保护：文件 > 2 MB 或估算行数 > 20000 时必须先确认 */
-  async function gateLargeWorkbook(file: File): Promise<boolean> {
+  /**
+   * 大工作簿前置保护：文件 > 2 MB 或估算行数 > 20000 时必须先确认。
+   * 返回解析模式：行数超限 → fast（只加载前 20000 行，与提示文案一致）；否则 normal。
+   */
+  async function gateLargeWorkbook(file: File): Promise<{ proceed: boolean; mode: 'auto' | 'fast' }> {
     const largeBySize = file.size > LARGE_XLSX_BYTES
     let estimatedRows = 0
     let largestSheet = ''
@@ -328,22 +354,28 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     } catch (error) {
       inspectError = (error as Error)?.message ?? '无法预读'
     }
-    if (!largeBySize && estimatedRows <= FALLBACK_MAX_ROWS) return true
+    const rowsTooMany = estimatedRows > FALLBACK_MAX_ROWS
+    if (!largeBySize && !rowsTooMany) return { proceed: true, mode: 'auto' }
 
-    return askConfirm({
+    const proceed = await askConfirm({
       title: `文件较大：${file.name}`,
-      description: `将只加载前 ${FALLBACK_MAX_ROWS.toLocaleString('en-US')} 行，超出的内容不会装进内存；解析完成后表格会显式标注「已截断」。`,
+      description: rowsTooMany
+        ? `将只加载前 ${FALLBACK_MAX_ROWS.toLocaleString('en-US')} 行，超出的内容不会装进内存；解析完成后表格会显式标注「已截断」。`
+        : `解析可能需要数秒，期间会显示进度；超过 5 秒可以取消。`,
       detail: [
         `文件大小：${formatSize(file.size)}`,
         estimatedRows
           ? `估算行数：${estimatedRows.toLocaleString('en-US')} 行（工作表「${largestSheet}」）`
           : `估算行数：无法预读${inspectError ? `（${inspectError}）` : ''}`,
-        `装载上限：${FALLBACK_MAX_ROWS.toLocaleString('en-US')} 行 / ${FALLBACK_MAX_CELLS.toLocaleString('en-US')} 单元格`,
+        rowsTooMany
+          ? `装载上限：${FALLBACK_MAX_ROWS.toLocaleString('en-US')} 行 / ${FALLBACK_MAX_CELLS.toLocaleString('en-US')} 单元格`
+          : '完整读取：行数在工作簿上限以内，不需要截断',
         '解析过程中可以随时取消，取消不会留下半个文件。',
       ],
-      confirmText: '继续解析',
+      confirmText: rowsTooMany ? '继续解析（只读前 20000 行）' : '继续解析',
       cancelText: '取消',
     })
+    return { proceed, mode: rowsTooMany ? 'fast' : 'auto' }
   }
 
   async function persistRecord(record: DocRecord) {
@@ -412,19 +444,21 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const created: DocRecord[] = []
     for (const file of accepted) {
       try {
+        let mode: 'auto' | 'fast' = 'auto'
         if (detectKind(file.name) === 'xlsx') {
-          const confirmed = await gateLargeWorkbook(file)
-          if (!confirmed) {
+          const gate = await gateLargeWorkbook(file)
+          if (!gate.proceed) {
             addToast({ title: `已跳过 ${file.name}`, description: '大文件解析需要确认后再进行', tone: 'info' })
             continue
           }
+          mode = gate.mode
         }
 
         startJob(file.name, '正在准备读取')
         // 让等待态先绘制出来，再进入可能阻塞主线程的解析
         await new Promise((resolve) => window.setTimeout(resolve, 16))
         const signal = abortController?.signal ?? new AbortController().signal
-        const { record, notices } = await buildRecord(file, signal, updateJobPhase)
+        const { record, notices } = await buildRecord(file, signal, updateJobPhase, mode)
         created.push(record)
         const result = await persistRecord(record)
         if (result.ok) {

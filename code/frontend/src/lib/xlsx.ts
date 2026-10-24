@@ -142,11 +142,24 @@ function cellValue(cell: XmlNode, shared: string[]): string {
   return v
 }
 
-function parseSheetXml(
+interface RowWalkOptions {
+  signal?: AbortSignal
+  onProgress?: (done: number, total: number) => void
+}
+
+const ROW_CHUNK = 2000
+
+/** 让出主线程：大表逐块解析时，等待态与「取消」才有机会生效 */
+function yieldToUi(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0))
+}
+
+async function parseSheetXml(
   xml: Document | null,
   shared: string[],
   maxRows: number = MAX_ROWS,
-): { rows: PersistedRow[]; totalRows: number; totalCols: number; truncated: boolean } {
+  options: RowWalkOptions = {},
+): Promise<{ rows: PersistedRow[]; totalRows: number; totalCols: number; truncated: boolean }> {
   if (!xml) return { rows: [], totalRows: 0, totalCols: 0, truncated: false }
   const root = xml.documentElement
   const data = firstChild(root, 'sheetData') ?? root
@@ -157,6 +170,11 @@ function parseSheetXml(
   let lastRow = 0
   let index = 0
   for (const rowEl of rowEls) {
+    if (index % ROW_CHUNK === 0) {
+      options.signal?.throwIfAborted()
+      options.onProgress?.(index, rowEls.length)
+      if (index > 0) await yieldToUi()
+    }
     const r = Number(attr(rowEl, 'r') ?? `${index + 1}`)
     index++
     lastRow = Math.max(lastRow, r)
@@ -195,7 +213,7 @@ function parseSheetXml(
   return { rows, totalRows: lastRow || rows.length, totalCols, truncated: rowEls.length > maxRows }
 }
 
-function toSheetData(name: string, parsed: ReturnType<typeof parseSheetXml>): SheetData {
+function toSheetData(name: string, parsed: Awaited<ReturnType<typeof parseSheetXml>>): SheetData {
   return {
     name,
     rows: parsed.rows.map((row) => row.cells),
@@ -373,7 +391,19 @@ export async function parseXlsxFallback(
     try {
       const raw = entryText(archive, entry.path) ?? ''
       const sliced = sliceSheetData(raw, maxRows, maxCells)
-      const parsed = parseSheetXml(parseXml(sliced.xml), shared, maxRows)
+      options.onProgress?.({ done: index, total: order.length, sheet: `${entry.name} · 解析 XML`, rows: 0 })
+      await yieldToUi()
+      const parsed = await parseSheetXml(parseXml(sliced.xml), shared, maxRows, {
+        signal,
+        onProgress: (done, total) => {
+          options.onProgress?.({
+            done: index,
+            total: order.length,
+            sheet: `${entry.name} · ${done}/${total} 行`,
+            rows: done,
+          })
+        },
+      })
       const shownRows = parsed.rows.length
       const truncated = sliced.truncatedBy !== '' || shownRows < parsed.totalRows
       const note = truncated ? truncationNote(shownRows, parsed.totalRows, sliced.truncatedBy) : undefined

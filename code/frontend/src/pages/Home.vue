@@ -91,7 +91,7 @@ function openDoc(id: string) {
     <div class="flex min-h-0 flex-1">
       <Sidebar :active-id="activeDoc?.id ?? null" variant="home" @select="openDoc" @remove="(id) => void store.removeDoc(id)" @reserved="handleReserved" />
 
-      <main class="thin-scroll min-w-0 flex-1 overflow-y-auto px-5 pb-10 pt-6 md:px-8">
+      <main class="thin-scroll min-w-0 flex-1 overflow-y-auto px-6 pb-12 pt-8 lg:px-10">
         <div class="mx-auto flex w-full max-w-[1120px] flex-col gap-4">
           <div class="lo-rise lo-delay-1 flex items-center justify-between gap-3">
             <div class="flex items-center gap-2 text-[12px] text-[#636366]">
@@ -113,7 +113,7 @@ function openDoc(id: string) {
           <section
             ref="cardRef"
             data-hero-card
-            class="lo-card lo-rise lo-delay-2 relative overflow-hidden shadow-[0_30px_80px_-40px_rgba(0,0,0,0.9)]"
+            class="lo-card lo-rise lo-delay-2 relative overflow-hidden"
             @mousemove="handleMove"
             @mouseleave="handleLeave"
           >
@@ -122,13 +122,13 @@ function openDoc(id: string) {
               :class="spotlight.on ? 'lo-spotlight-on' : ''"
               :style="{ '--spot-x': `${spotlight.x}px`, '--spot-y': `${spotlight.y}px` }"
             />
-            <div class="relative grid gap-7 p-7 lg:grid-cols-[3fr_2fr] lg:p-9">
+            <div class="relative grid gap-6 p-6 lg:grid-cols-[3fr_2fr] lg:p-8">
               <div class="flex min-w-0 flex-col">
                 <p class="text-[12px] font-medium tracking-[0.16em] text-[#98989D]">LOCAL-FIRST WORKSPACE</p>
-                <h1 class="mt-3 text-[34px] font-semibold leading-[1.15] tracking-tight text-white md:text-[40px]">
+                <h1 class="mt-3 text-[34px] font-semibold leading-[1.15] tracking-tight text-[#F5F5F7] md:text-[40px]">
                   打开一个文档
                 </h1>
-                <p class="mt-3 text-[14.5px] leading-relaxed text-[#A1A1A6] md:mt-4">
+                <p class="mt-3 text-[14.5px] leading-relaxed text-[#98989D] md:mt-4">
                   拖进窗口，或点顶部「打开文件」
                 </p>
 
@@ -159,7 +159,7 @@ function openDoc(id: string) {
               <!-- 虚线拖拽框：与左列等高 -->
               <button
                 type="button"
-                class="lo-press group relative flex min-h-[200px] w-full flex-col lg:min-h-[248px] items-center justify-center overflow-hidden rounded-[24px] border border-dashed px-4 py-8 text-center outline-none focus-visible:ring-2 focus-visible:ring-[#0A84FF]/60"
+                class="lo-press group relative flex min-h-[184px] w-full flex-col items-center justify-center overflow-hidden rounded-[24px] border border-dashed px-4 py-8 text-center outline-none focus-visible:ring-2 focus-visible:ring-[#0A84FF]/60 lg:min-h-[232px]"
                 :class="
                   dropHover
                     ? 'lo-drag-breathe border-solid border-[#0A84FF]'
@@ -184,7 +184,7 @@ function openDoc(id: string) {
                 <span class="relative mt-4 text-[14px] font-medium text-[#F5F5F7]">
                   {{ dropHover ? '松手即可打开' : '或拖入文件' }}
                 </span>
-                <span class="relative mt-1.5 max-w-[220px] text-[12px] leading-relaxed text-[#636366]">
+                <span class="relative mt-1.5 max-w-[248px] text-[12px] leading-relaxed text-[#636366]">
                   {{ busy ? '正在本地解析，文件不会离开这台设备' : '支持多文件同时导入，切换后内容互不影响' }}
                 </span>
                 <span
@@ -202,7 +202,7 @@ function openDoc(id: string) {
             <div
               v-for="item in PRIVACY"
               :key="item.key"
-              class="lo-card lo-hover-lift flex min-w-0 items-center gap-3 px-4 py-3.5"
+              class="lo-card lo-hover-lift flex min-w-0 items-center gap-3 px-4 py-4"
             >
               <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white/[0.06]">
                 <AppIcon :name="item.icon" class="h-4 w-4 text-[#C7C7CC]" />
@@ -223,7 +223,7 @@ function openDoc(id: string) {
           </section>
 
           <!-- 当前会话：只有存在真实文件时展示 -->
-          <section v-if="docs.length > 0" class="lo-card lo-rise lo-delay-4 p-5">
+          <section v-if="docs.length > 0" class="lo-card lo-rise lo-delay-4 p-6">
             <div class="flex items-center justify-between gap-3">
               <div>
                 <h2 class="text-[14px] font-semibold text-[#F5F5F7]">当前会话</h2>
@@ -258,7 +258,7 @@ function openDoc(id: string) {
             </ul>
           </section>
 
-          <div v-else class="lo-card lo-rise lo-delay-4 flex items-center gap-3 px-5 py-4">
+          <div v-else class="lo-card lo-rise lo-delay-4 flex items-center gap-3 px-6 py-4">
             <span class="flex h-9 w-9 items-center justify-center rounded-xl bg-white/[0.06]">
               <AppIcon name="file-text" class="h-4 w-4 text-[#636366]" />
             </span>

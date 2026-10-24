@@ -34,7 +34,7 @@ src/
     app/FileDropProvider.vue  app/fileDropContext.ts  app/ErrorBoundary.vue
     editor/Toolbar.vue  editor/SheetView.vue
     ui/AppButton.vue  AppCard.vue  AppBadge.vue  AppIcon.vue  ui/iconRegistry.ts
-  lib/                 # 纯 TS 解析 / 导出（算法原样保留）
+  lib/                 # 纯 TS 解析 / 导出（docx/xlsx/zip/xml/file/exporter 算法原样保留）
     docx.ts  xlsx.ts  pdf.ts  zip.ts  xml.ts  db.ts  file.ts  markdown.ts
     exporter.ts        # 下载与导出自检（blob URL）
     sheetjs-loader.ts  # 从 npm 包 xlsx 适配，不再走 public/vendor 或 http
@@ -61,9 +61,9 @@ src/
 
 ## 依赖
 
-运行时：`vue`、`vue-router`、`pinia`、`xlsx`（SheetJS，按需异步 chunk）。
-`docx` / `pdfjs-dist` 未使用：DOCX 回写由内置 `lib/zip.ts` + `lib/docx.ts` 直接生成 OOXML，
-PDF 文本由内置 `lib/pdf.ts` 解析（FlateDecode + ToUnicode CMap），因此不安装。
+运行时：`vue`、`vue-router`、`pinia`、`xlsx`（SheetJS，按需异步 chunk）、
+`pdfjs-dist@4.10.38`（PDF 文本提取 + 页面 canvas 渲染，按需异步 chunk；worker 由 Vite 本地打包）。
+`docx` 未使用：DOCX 回写由内置 `lib/zip.ts` + `lib/docx.ts` 直接生成 OOXML。
 
 构建期：`vite`、`@vitejs/plugin-vue`、`typescript`、`vue-tsc`、`tailwindcss`、`postcss`、`autoprefixer`。
 
