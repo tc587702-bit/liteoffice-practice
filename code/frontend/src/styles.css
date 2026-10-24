@@ -1,0 +1,717 @@
+/* ============================================================================
+   LiteOffice 工作台样式
+   布局：顶栏 / 三栏（侧栏 · 编辑区 · 可选助手）/ 状态栏
+   设计取向：中性干净的底 + 一处强调色（靛蓝）+ 按文件类型上色的色块
+   ========================================================================== */
+
+:root {
+  /* 底色与层次 */
+  --bg: #f4f6f9;
+  --panel: #ffffff;
+  --panel-sunken: #f8fafc;
+  --border: #e6eaf0;
+  --border-strong: #d8dee8;
+
+  /* 文字 */
+  --text: #131a24;
+  --text-2: #4b5563;
+  --muted: #8b94a3;
+
+  /* 强调色（只有一处，避免花） */
+  --brand: #4f46e5;
+  --brand-hover: #4338ca;
+  --brand-weak: #eef0ff;
+  --brand-ring: rgba(79, 70, 229, 0.18);
+
+  /* 文件类型色块：docx 蓝 / xlsx 绿 / pptx 橙 / pdf 红 / md 青 */
+  --docx: #2563eb;
+  --xlsx: #0f9d58;
+  --pptx: #ea580c;
+  --pdf: #dc2626;
+  --md: #0e7490;
+  --unknown: #6b7280;
+
+  /* 状态色 */
+  --ok: #16a34a;
+  --warn: #d97706;
+  --error: #dc2626;
+
+  --radius: 10px;
+  --radius-sm: 7px;
+  --shadow-1: 0 1px 2px rgba(16, 24, 40, 0.05);
+  --shadow-2: 0 6px 18px rgba(16, 24, 40, 0.07);
+  --font: 'Segoe UI Variable Display', 'Segoe UI', system-ui, -apple-system, 'PingFang SC',
+    'HarmonyOS Sans SC', 'Microsoft YaHei', sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--font);
+  color: var(--text);
+  background: var(--bg);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---------- 骨架 ---------- */
+
+.workbench {
+  height: 100%;
+  display: grid;
+  grid-template-rows: 60px 1fr 32px;
+  position: relative;
+}
+
+.main {
+  display: grid;
+  min-height: 0; /* 关键：否则子元素 overflow 不生效，编辑区被内容撑高 */
+  gap: 0;
+}
+
+.main[data-cols='sidebar editor'] {
+  grid-template-columns: 268px 1fr;
+}
+
+.main[data-cols='sidebar editor agent'] {
+  grid-template-columns: 268px 1fr 304px;
+}
+
+/* ---------- 顶栏 ---------- */
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 18px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  box-shadow: var(--shadow-1);
+  z-index: 2;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.logo {
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  background: linear-gradient(135deg, #6366f1, #4338ca);
+  color: #fff;
+  font-weight: 800;
+  font-size: 12px;
+  letter-spacing: 0.3px;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 2px 6px var(--brand-ring);
+}
+
+.title {
+  font-weight: 650;
+  font-size: 15px;
+  letter-spacing: -0.005em;
+}
+
+.subtitle {
+  color: var(--muted);
+  font-size: 11.5px;
+  letter-spacing: 0.02em;
+}
+
+/* 当前文件的色块徽标 */
+.current {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 340px;
+  min-width: 0;
+  margin-left: 6px;
+}
+
+.current.muted,
+.muted {
+  color: var(--muted);
+}
+
+.name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+/* ---------- 按钮 ---------- */
+
+.actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.btn {
+  height: 34px;
+  padding: 0 15px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  color: var(--text-2);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  transition: border-color 0.15s, color 0.15s, background 0.15s, transform 0.06s;
+}
+
+.btn:hover:not(:disabled) {
+  border-color: var(--brand);
+  color: var(--brand);
+}
+
+.btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.btn.primary {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: #fff;
+  box-shadow: 0 2px 6px var(--brand-ring);
+}
+
+.btn.primary:hover:not(:disabled) {
+  background: var(--brand-hover);
+  border-color: var(--brand-hover);
+  color: #fff;
+}
+
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* 预览 / 编辑 分段控件 */
+.mode-switch {
+  display: inline-flex;
+  padding: 3px;
+  background: var(--panel-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  flex: none;
+}
+
+.seg {
+  height: 28px;
+  padding: 0 14px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+}
+
+.seg:hover {
+  color: var(--brand);
+}
+
+.seg.on {
+  background: #fff;
+  color: var(--brand);
+  font-weight: 600;
+  box-shadow: var(--shadow-1);
+}
+
+/* ---------- 侧栏 ---------- */
+
+.sidebar,
+.agent-panel {
+  background: var(--panel);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.sidebar {
+  border-right: 1px solid var(--border);
+}
+
+.agent-panel {
+  border-left: 1px solid var(--border);
+}
+
+.sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+}
+
+.count {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--brand-weak);
+  color: var(--brand);
+  font-size: 11px;
+}
+
+.file-list {
+  list-style: none;
+  margin: 0;
+  padding: 8px;
+  overflow: auto;
+  flex: 1;
+}
+
+.file-item {
+  position: relative;
+  display: grid;
+  grid-template-columns: 30px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  margin-bottom: 4px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, box-shadow 0.12s;
+}
+
+.file-item:hover {
+  background: var(--panel-sunken);
+  border-color: var(--border);
+}
+
+.file-item.active {
+  background: var(--brand-weak);
+  border-color: #d5d9ff;
+  box-shadow: var(--shadow-1);
+}
+
+/* 左侧类型色条：让当前文件一眼可辨 */
+.file-item.active::before {
+  content: '';
+  position: absolute;
+  left: -1px;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--brand);
+}
+
+/* 文件类型色块 */
+.fmt {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--unknown);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.2px;
+  text-transform: uppercase;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.12);
+}
+
+.fmt[data-fmt='docx'] {
+  background: var(--docx);
+}
+.fmt[data-fmt='xlsx'] {
+  background: var(--xlsx);
+}
+.fmt[data-fmt='pptx'] {
+  background: var(--pptx);
+}
+.fmt[data-fmt='pdf'] {
+  background: var(--pdf);
+}
+.fmt[data-fmt='md'] {
+  background: var(--md);
+}
+
+.fname {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.fsize {
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 关闭按钮：悬停才明显，避免抢视觉 */
+.close {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 0.12s, background 0.12s, color 0.12s;
+}
+
+.file-item:hover .close {
+  opacity: 1;
+}
+
+.close:hover {
+  background: #fee2e2;
+  color: var(--error);
+}
+
+.empty {
+  padding: 18px 16px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.9;
+}
+
+/* ---------- 编辑区 ---------- */
+
+.editor-host {
+  background: var(--panel);
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+.editor-mount {
+  position: absolute;
+  inset: 0;
+}
+
+/*
+ * 编辑器现在跑在独立页面里（/editor.html），我们只负责给它一个精确的框。
+ *
+ * 为什么改成 iframe：onlyoffice-web-local 是按「整页应用」设计的
+ * （容器 100vh、路由带 ?url=）。直接挂到子区域会出现坐标错乱——
+ * 实测「文字正常、光标永远偏上一行」。同一个库在整页环境里完全正常，
+ * 所以让它独占一个页面，那个页面里 100vh 就等于这个 iframe 的高度。
+ *
+ * 这一改动顺带删掉了之前一堆针对库内部元素（.editor-container / #iframe）
+ * 的补丁样式——那些都是和在子区域里对抗留下的，现在不需要了。
+ */
+.lo-editor-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #fff;
+}
+
+.editor-empty {
+  height: 100%;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 10px;
+  text-align: center;
+  color: var(--muted);
+  background: radial-gradient(circle at 50% 35%, #fbfcff 0%, var(--panel) 60%);
+  padding: 24px;
+}
+
+/* 空状态：不用色块，用一条细线和克制的字距营造留白感 */
+.editor-empty {
+  height: 100%;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 0;
+  text-align: center;
+  background: var(--panel);
+  padding: 32px;
+}
+
+/* 一条细横线 + 一个点，替代图标：几乎不占视觉重量 */
+.empty-mark {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 26px;
+  opacity: 0.9;
+}
+
+.mark-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--brand);
+}
+
+.mark-line {
+  width: 34px;
+  height: 1px;
+  background: linear-gradient(90deg, var(--brand), rgba(79, 70, 229, 0.12));
+}
+
+.empty-title {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  line-height: 1.4;
+}
+
+.empty-sub {
+  margin: 9px 0 0;
+  font-size: 13.5px;
+  color: var(--text-2);
+  line-height: 1.7;
+  letter-spacing: 0.01em;
+}
+
+.empty-note {
+  margin: 22px 0 0;
+  font-size: 11.5px;
+  color: var(--muted);
+  letter-spacing: 0.06em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 状态栏 ---------- */
+
+.statusbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px;
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.statusbar .text {
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.statusbar .right {
+  margin-left: auto;
+  white-space: nowrap;
+  padding-left: 12px;
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--muted);
+  flex: none;
+}
+
+.dot[data-level='ok'] {
+  background: var(--ok);
+}
+.dot[data-level='warn'] {
+  background: var(--warn);
+}
+.dot[data-level='error'] {
+  background: var(--error);
+}
+
+/* ---------- 拖放遮罩 ---------- */
+
+.drop-overlay {
+  position: absolute;
+  inset: 10px;
+  border: 2px dashed var(--brand);
+  border-radius: 14px;
+  background: rgba(79, 70, 229, 0.06);
+  -webkit-backdrop-filter: blur(1px);
+  backdrop-filter: blur(1px);
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--brand);
+  z-index: 50;
+}
+
+/* ---------- 助手面板占位 ---------- */
+
+.agent-body {
+  padding: 16px;
+  font-size: 13px;
+  line-height: 1.8;
+  color: var(--text-2);
+}
+
+.agent-body .small {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* ---------- 致命错误横幅 ---------- */
+
+.fatal-banner {
+  position: absolute;
+  left: 50%;
+  bottom: 44px;
+  transform: translateX(-50%);
+  max-width: min(920px, calc(100% - 40px));
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 14px;
+  border: 1px solid #fecaca;
+  border-radius: 10px;
+  background: #fff5f5;
+  box-shadow: 0 8px 28px rgba(220, 38, 38, 0.16);
+  font-size: 12.5px;
+  color: #991b1b;
+  z-index: 99;
+}
+
+.fatal-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #dc2626;
+  flex: none;
+  margin-top: 6px;
+}
+
+/* 完整显示，不截断 —— 被截断的错误信息等于没有信息 */
+.fatal-text {
+  flex: 1;
+  min-width: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.55;
+  max-height: 8em;
+  overflow-y: auto;
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 12px;
+}
+
+.fatal-copy {
+  align-self: flex-start;
+  flex: none;
+  height: 24px;
+  padding: 0 9px;
+  border: 1px solid #fca5a5;
+  border-radius: 6px;
+  background: #fff;
+  color: #b91c1c;
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.fatal-copy:hover {
+  background: #fee2e2;
+}
+
+.fatal-hint {
+  color: #b91c1c;
+  opacity: 0.65;
+  white-space: nowrap;
+}
+
+.fatal-close {
+  border: none;
+  background: transparent;
+  color: #b91c1c;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+  flex: none;
+}
+
+/* ---------- 编辑器加载遮罩 ---------- */
+
+.editor-loading {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 8px;
+  text-align: center;
+  padding: 32px;
+  background: var(--panel);
+  z-index: 40;
+}
+
+.editor-loading .spin {
+  width: 28px;
+  height: 28px;
+  border: 2.5px solid var(--border-strong);
+  border-top-color: var(--brand);
+  border-radius: 50%;
+  animation: lo-spin 0.9s linear infinite;
+  margin-bottom: 6px;
+}
+
+@keyframes lo-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.editor-loading .loading-title {
+  margin: 0;
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.editor-loading .loading-time {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--brand);
+  font-variant-numeric: tabular-nums;
+}
+
+.editor-loading .loading-note {
+  margin: 6px 0 0;
+  max-width: 420px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--muted);
+}
+
+.editor-loading .loading-note.warn {
+  color: #b45309;
+}

@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LiteOffice 编辑器</title>
+    <style>
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        background: #fff;
+        font-family: 'Segoe UI', system-ui, 'Microsoft YaHei', sans-serif;
+      }
+      #editor-root {
+        width: 100%;
+        height: 100%;
+        position: relative;
+      }
+      /*
+       * 必须补的两条高度规则，原因（从 dist 源码读出来的）：
+       *   库内部挂载时先插一层**无类名、无高度**的 <div> 包装：
+       *     H = document.createElement("div"); w.appendChild(H); e.mount(H);
+       *   组件根节点 .editor-container 在 H 里面。
+       * 如果不给这层包装高度，.editor-container 的 100% 就没有可参照的父高度，
+       * 整条高度链断裂 → 文档画布高度变 0 → 只剩菜单栏和状态栏，
+       * 或者整个 iframe 一片空白。
+       */
+      #editor-root > div {
+        width: 100%;
+        height: 100%;
+      }
+      #editor-root .editor-container {
+        width: 100% !important;
+        height: 100% !important;
+      }
+      #editor-root iframe,
+      #editor-root #iframe {
+        display: block;
+        width: 100% !important;
+        height: 100% !important;
+        border: 0;
+      }
+      /* 出错时才显示的信息层 */
+      #editor-error {
+        display: none;
+        position: absolute;
+        inset: 0;
+        place-content: center;
+        text-align: center;
+        padding: 32px;
+        color: #991b1b;
+        background: #fff;
+        font-size: 13px;
+        line-height: 1.8;
+      }
+      #editor-error.show {
+        display: grid;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="editor-root"></div>
+    <div id="editor-error"></div>
+    <script type="module" src="/src/editor/main-editor.ts"></script>
+  </body>
+</html>
