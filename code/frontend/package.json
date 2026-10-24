@@ -1,32 +1,28 @@
 {
   "name": "liteoffice-vue",
-  "version": "0.1.0",
   "private": true,
+  "version": "0.1.0",
   "type": "module",
-  "description": "LiteOffice Vue 版：浏览器内打开 / 预览 / 编辑 / 保存 Office 文档",
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
-    "typecheck": "vue-tsc --noEmit",
-    "setup": "node scripts/prepare-vue-office.mjs && node scripts/prepare-onlyoffice.mjs",
-    "prepare:vo": "node scripts/prepare-vue-office.mjs",
-    "prepare:oo": "node scripts/prepare-onlyoffice.mjs",
-    "check:oo": "node scripts/prepare-onlyoffice.mjs --check",
-    "check:enc": "node scripts/check-encoding.mjs"
+    "typecheck": "vue-tsc --noEmit"
   },
   "dependencies": {
-    "@vue-office/docx": "^1.6.3",
-    "@vue-office/excel": "^1.7.14",
-    "@vue-office/pdf": "^2.0.10",
-    "@vue-office/pptx": "^1.0.1",
-    "onlyoffice-web-local": "^1.0.2",
-    "vue": "^3.5.13"
+    "pdfjs-dist": "^4.10.38",
+    "pinia": "^4.1.0",
+    "vue": "^3.5.44",
+    "vue-router": "^5.4.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
-    "@vitejs/plugin-vue": "^5.2.1",
-    "typescript": "^5.7.2",
-    "vite": "^6.0.5",
-    "vue-tsc": "^2.1.10"
+    "@vitejs/plugin-vue": "^6.0.10",
+    "autoprefixer": "^10.6.1",
+    "postcss": "^8.5.31",
+    "tailwindcss": "^3.4.19",
+    "typescript": "5.9",
+    "vite": "^8.3.5",
+    "vue-tsc": "^3.3.13"
   }
 }

@@ -1,0 +1,563 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ------------------------------------------------------------------ */
+/* 冻结深色令牌                                                         */
+/* ------------------------------------------------------------------ */
+:root {
+  --lo-bg: #000000;
+  --lo-card: #303032;
+  --lo-card-radius: 24px;
+  --lo-border: rgba(255, 255, 255, 0.08);
+  --lo-divider: rgba(255, 255, 255, 0.06);
+  --lo-primary: #0a84ff;
+  --lo-primary-hover: #339bff;
+  --lo-primary-shadow: 0 4px 16px rgba(10, 132, 255, 0.3);
+  --lo-secondary: #3a3a3c;
+  --lo-secondary-hover: #48484a;
+  --lo-text-1: #f5f5f7;
+  --lo-text-2: #98989d;
+  --lo-text-3: #a1a1a6;
+  --lo-text-4: #636366;
+  --lo-glass: rgba(28, 28, 30, 0.75);
+  --lo-glass-blur: blur(20px);
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  overflow: hidden;
+  background-color: var(--lo-bg);
+  color: var(--lo-text-1);
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 纯黑底 + 蓝紫径向光晕（0.07 - 0.09） */
+.lo-ambient {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-color: #000000;
+  background-image:
+    radial-gradient(760px 520px at 16% -8%, rgba(10, 132, 255, 0.09), transparent 62%),
+    radial-gradient(680px 460px at 88% 3%, rgba(94, 92, 230, 0.08), transparent 60%),
+    radial-gradient(900px 620px at 52% 116%, rgba(88, 86, 214, 0.07), transparent 66%);
+}
+
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* ---------- 深色细滚动条 ---------- */
+.thin-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
+}
+.thin-scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.thin-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: 9999px;
+}
+.thin-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.paper-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.2) transparent;
+}
+.paper-scroll::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.paper-scroll::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.18);
+  border-radius: 9999px;
+}
+
+/* ------------------------------------------------------------------ */
+/* 组件级冻结样式                                                       */
+/* ------------------------------------------------------------------ */
+@layer components {
+  .lo-card {
+    background-color: var(--lo-card);
+    border: 1px solid var(--lo-border);
+    border-radius: var(--lo-card-radius);
+  }
+
+  /* 顶栏 / 侧栏玻璃层：rgba(28,28,30,0.75) + blur(20px)，含 -webkit- 前缀 */
+  .lo-glass {
+    background-color: var(--lo-glass);
+    -webkit-backdrop-filter: blur(20px);
+    backdrop-filter: blur(20px);
+  }
+
+  .lo-divider {
+    background-color: var(--lo-divider);
+  }
+
+  .lo-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    white-space: nowrap;
+    border-radius: 9999px;
+    font-weight: 500;
+    outline: none;
+    cursor: pointer;
+    transition:
+      background-color 0.18s ease,
+      color 0.18s ease,
+      border-color 0.18s ease,
+      transform 0.18s ease,
+      opacity 0.18s ease;
+  }
+  .lo-btn:focus-visible {
+    box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.6);
+  }
+  .lo-btn:disabled {
+    opacity: 0.4;
+    pointer-events: none;
+  }
+
+  .lo-btn-primary {
+    background-color: var(--lo-primary);
+    color: #ffffff;
+    box-shadow: var(--lo-primary-shadow);
+  }
+  .lo-btn-primary:hover {
+    background-color: var(--lo-primary-hover);
+  }
+
+  .lo-btn-secondary {
+    background-color: var(--lo-secondary);
+    color: var(--lo-text-1);
+    border: 1px solid var(--lo-border);
+  }
+  .lo-btn-secondary:hover {
+    background-color: var(--lo-secondary-hover);
+  }
+
+  .lo-btn-ghost {
+    background-color: transparent;
+    color: var(--lo-text-3);
+  }
+  .lo-btn-ghost:hover {
+    background-color: rgba(255, 255, 255, 0.06);
+    color: var(--lo-text-1);
+  }
+
+  .lo-btn-outline {
+    background-color: transparent;
+    color: var(--lo-text-1);
+    border: 1px solid var(--lo-border);
+  }
+  .lo-btn-outline:hover {
+    border-color: rgba(255, 255, 255, 0.2);
+    background-color: rgba(255, 255, 255, 0.06);
+  }
+
+  .lo-btn-danger {
+    background-color: rgba(255, 69, 58, 0.12);
+    color: #ff6961;
+    border: 1px solid rgba(255, 69, 58, 0.3);
+  }
+  .lo-btn-danger:hover {
+    background-color: rgba(255, 69, 58, 0.2);
+  }
+
+  .lo-btn-sm {
+    height: 28px;
+    padding: 0 12px;
+    font-size: 12px;
+  }
+  .lo-btn-md {
+    height: 36px;
+    padding: 0 16px;
+    font-size: 14px;
+  }
+  .lo-btn-lg {
+    height: 44px;
+    padding: 0 24px;
+    font-size: 15px;
+  }
+  .lo-btn-icon {
+    height: 32px;
+    width: 32px;
+    padding: 0;
+    border-radius: 10px;
+  }
+
+  .lo-badge {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 6px;
+    padding: 0 6px;
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 16px;
+  }
+
+  .lo-input {
+    border-radius: 10px;
+    border: 1px solid var(--lo-border);
+    background-color: rgba(255, 255, 255, 0.04);
+    color: var(--lo-text-1);
+    outline: none;
+  }
+  .lo-input::placeholder {
+    color: var(--lo-text-4);
+  }
+  .lo-input:focus {
+    border-color: rgba(10, 132, 255, 0.6);
+  }
+}
+
+/* ---------- 动效（全部可在 reduced-motion 下降级） ---------- */
+@keyframes lo-rise {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.lo-rise {
+  opacity: 0;
+  animation: lo-rise 0.6s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+.lo-delay-1 {
+  animation-delay: 0.06s;
+}
+.lo-delay-2 {
+  animation-delay: 0.14s;
+}
+.lo-delay-3 {
+  animation-delay: 0.24s;
+}
+.lo-delay-4 {
+  animation-delay: 0.34s;
+}
+
+@keyframes lo-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+@keyframes lo-breathe {
+  0%,
+  100% {
+    background-color: rgba(10, 132, 255, 0.012);
+  }
+  50% {
+    background-color: rgba(10, 132, 255, 0.045);
+  }
+}
+
+@keyframes lo-spin-slow {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes lo-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.lo-spin {
+  animation: lo-spin 0.9s linear infinite;
+}
+
+.lo-eye-float {
+  animation: lo-float 2.4s ease-in-out infinite;
+}
+
+.lo-drag-breathe {
+  animation: lo-breathe 2.8s ease-in-out infinite;
+}
+
+.lo-ring-spin {
+  animation: lo-spin-slow 9s linear infinite;
+}
+
+/* 点击回弹：松开后 cubic-bezier(0.34,1.56,1) 弹性归位 */
+.lo-press {
+  transition:
+    transform 0.38s cubic-bezier(0.34, 1.56, 0.64, 1),
+    filter 0.2s ease,
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    opacity 0.2s ease;
+}
+.lo-press:active {
+  transform: scale(0.96);
+  transition: transform 0.1s ease-in;
+}
+
+.lo-hover-lift {
+  transition: all 0.2s ease;
+}
+.lo-hover-lift:hover {
+  transform: translateY(-2px);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+/* 聚光灯 */
+.lo-spotlight {
+  background: radial-gradient(
+    300px circle at var(--spot-x, 50%) var(--spot-y, 50%),
+    rgba(255, 255, 255, 0.05),
+    transparent
+  );
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+.lo-spotlight-on {
+  opacity: 1;
+}
+
+/* 解析进度条：不确定进度时的往复滑动 */
+@keyframes lo-indeterminate {
+  0% {
+    transform: translateX(-110%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
+}
+
+.lo-indeterminate {
+  animation: lo-indeterminate 1.25s ease-in-out infinite;
+}
+
+/* 老虎机数字 */
+.lo-reel {
+  display: inline-block;
+  height: 1em;
+  overflow: hidden;
+  vertical-align: bottom;
+  line-height: 1;
+}
+.lo-reel-col {
+  display: flex;
+  flex-direction: column;
+  height: 1em;
+  overflow: hidden;
+}
+.lo-reel-digit {
+  height: 1em;
+  line-height: 1;
+  display: block;
+}
+.lo-reel-track {
+  display: flex;
+  flex-direction: column;
+  transform: translateY(0);
+  transition: transform 0.9s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.lo-reel-start .lo-reel-track {
+  transform: translateY(-9em);
+  transition: none;
+}
+.lo-reel-armed .lo-reel-track {
+  transform: translateY(-10em);
+}
+.lo-reel-armed.lo-reel-start .lo-reel-track {
+  transition: transform 0.9s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.lo-reel-armed.lo-reel-delay-1 .lo-reel-track {
+  transition-delay: 60ms;
+}
+.lo-reel-armed.lo-reel-delay-2 .lo-reel-track {
+  transition-delay: 120ms;
+}
+
+/* ---------- 文档纸面（编辑区内容保持纸白，属于文档内容而非应用外壳） ---------- */
+.lo-editor {
+  outline: none;
+  line-height: 1.75;
+  color: #1d1d1f;
+  font-size: 15px;
+}
+.lo-editor:empty::before {
+  content: attr(data-placeholder);
+  color: #a1a1a6;
+}
+.lo-editor h1 {
+  font-size: 28px;
+  line-height: 1.3;
+  font-weight: 700;
+  margin: 18px 0 10px;
+}
+.lo-editor h2 {
+  font-size: 22px;
+  line-height: 1.35;
+  font-weight: 650;
+  margin: 16px 0 8px;
+}
+.lo-editor h3 {
+  font-size: 18px;
+  line-height: 1.4;
+  font-weight: 600;
+  margin: 14px 0 6px;
+}
+.lo-editor h1:first-child,
+.lo-editor h2:first-child,
+.lo-editor h3:first-child {
+  margin-top: 0;
+}
+.lo-editor p {
+  margin: 0 0 10px;
+}
+.lo-editor ul,
+.lo-editor ol {
+  padding-left: 26px;
+  margin: 0 0 12px;
+}
+.lo-editor .lo-marker {
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  color: #3a3a3c;
+}
+.lo-editor ul {
+  list-style: disc;
+}
+.lo-editor ol {
+  list-style: decimal;
+}
+.lo-editor li {
+  margin: 3px 0;
+}
+.lo-editor blockquote {
+  border-left: 3px solid #0a84ff;
+  background: #f5f9ff;
+  padding: 8px 14px;
+  margin: 10px 0;
+  color: #3a3a3c;
+}
+.lo-editor pre {
+  background: #f4f4f5;
+  border: 1px solid #e5e5ea;
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-family: 'SF Mono', ui-monospace, Menlo, monospace;
+  font-size: 13px;
+  overflow-x: auto;
+  white-space: pre-wrap;
+}
+.lo-editor code {
+  font-family: 'SF Mono', ui-monospace, Menlo, monospace;
+  font-size: 0.92em;
+  background: #f4f4f5;
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+.lo-editor pre code {
+  background: transparent;
+  padding: 0;
+}
+.lo-editor table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 12px 0;
+  font-size: 14px;
+}
+.lo-editor th,
+.lo-editor td {
+  border: 1px solid #d9d9de;
+  padding: 6px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+.lo-editor th {
+  background: #f2f2f7;
+  font-weight: 600;
+}
+.lo-editor img {
+  max-width: 100%;
+  border-radius: 8px;
+  margin: 8px 0;
+}
+.lo-editor .lo-img-placeholder {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px dashed #c7c7cc;
+  border-radius: 8px;
+  padding: 6px 12px;
+  background: #f7f7fa;
+  color: #636366;
+  font-size: 13px;
+  margin: 6px 0;
+}
+.lo-editor a {
+  color: #0a84ff;
+  text-decoration: underline;
+}
+
+.lo-tab {
+  display: inline-block;
+  width: 2em;
+}
+
+.lo-word-wrap {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
+  }
+  .lo-rise {
+    opacity: 1;
+    transform: none;
+  }
+  .lo-spotlight {
+    display: none;
+  }
+  .lo-reel,
+  .lo-reel-col {
+    height: auto;
+    overflow: visible;
+  }
+  .lo-reel-track {
+    transform: none !important;
+  }
+  .lo-reel-digit:not(:last-child) {
+    display: none;
+  }
+}
