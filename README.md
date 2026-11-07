@@ -119,7 +119,8 @@ npm run smoke        # 另开终端，端到端自检（需服务已启动）
 
 - 数据库自动创建在 `code/backend/data/liteoffice.db`，可用 `LITEOFFICE_DB` 覆盖。
 - 若已执行前端 `npm run build`，后端会同时托管 `code/frontend/dist`，只开 3000 端口即可。
-- 日志默认输出 JSON Lines：`LITEOFFICE_LOG_LEVEL=debug` 调级别，`LITEOFFICE_LOG_FORMAT=text` 换人话。
+- 日志默认输出 JSON Lines 并落盘到 `code/backend/logs/backend.log`（自动轮转）；
+  `LITEOFFICE_LOG_LEVEL=debug` 调级别，`LITEOFFICE_LOG_FORMAT=text` 换人话，`LITEOFFICE_LOG_FILE=off` 关闭落盘。
 - 每个请求都有 `requestId`，响应头 `X-Request-Id` 与日志同值，便于串联排查。
 
 ### 3. Agent 服务（可选）
@@ -136,7 +137,7 @@ python -m app.test_kb     # 另开终端，知识库自检
 - 未配置 `DEEPSEEK_API_KEY` 等凭据时自动进入 mock 模式，流程不阻塞。
 - 环境变量需由 shell 导出；项目没有内置 `.env` 自动加载。
 - 后端已把 `/agent/*` 代理到 8100，也可直接访问 `http://localhost:8100/docs`。
-- 日志同样是 JSON Lines（`LITEOFFICE_LOG_LEVEL` / `LITEOFFICE_LOG_FORMAT`），
+- 日志同样是 JSON Lines 并落盘到 `code/agent/logs/agent.log`（自动轮转），
   错误统一带 `code` 与 `requestId`，消费方据此分支处理。
 
 ---

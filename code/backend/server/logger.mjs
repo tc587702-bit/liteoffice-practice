@@ -13,12 +13,84 @@
  *   4. 每个请求用 child({ requestId }) 派生子 logger，日志可按请求聚合
  */
 import { randomUUID } from 'node:crypto'
+import { appendFileSync, existsSync, mkdirSync, renameSync, rmSync, statSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 const LEVELS = { debug: 10, info: 20, warn: 30, error: 40, silent: 99 }
 const configured = String(process.env.LITEOFFICE_LOG_LEVEL ?? 'info').toLowerCase()
 const MIN_LEVEL = LEVELS[configured] ?? LEVELS.info
 const JSON_MODE = String(process.env.LITEOFFICE_LOG_FORMAT ?? 'json').toLowerCase() !== 'text'
 const SERVICE = process.env.LITEOFFICE_SERVICE_NAME ?? 'liteoffice-backend'
+
+/* ---------------- 落盘 ---------------- */
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
+
+/** 日志文件路径；LITEOFFICE_LOG_FILE=off 可关闭落盘（排查「日志写不进去」时用） */
+const LOG_FILE_ENV = process.env.LITEOFFICE_LOG_FILE
+const LOG_FILE_RAW =
+  LOG_FILE_ENV === undefined ? resolve(__dirname, '..', 'logs', 'backend.log') : String(LOG_FILE_ENV).trim()
+let FILE_ENABLED = !['', 'off', 'false', '0', 'none', 'disable', 'disabled'].includes(LOG_FILE_RAW.toLowerCase())
+const LOG_FILE = FILE_ENABLED ? resolve(LOG_FILE_RAW) : ''
+/** 单文件上限（默认 10 MB）与保留份数（默认 3 份，即 .1 .2 .3） */
+const MAX_FILE_BYTES = Number(process.env.LITEOFFICE_LOG_MAX_BYTES ?? 10 * 1024 * 1024) || 10 * 1024 * 1024
+const BACKUPS = Number(process.env.LITEOFFICE_LOG_BACKUPS ?? 3) || 0
+
+let fileSize = 0
+let fileErrorReported = false
+
+if (FILE_ENABLED) {
+  try {
+    mkdirSync(dirname(LOG_FILE), { recursive: true })
+    fileSize = existsSync(LOG_FILE) ? statSync(LOG_FILE).size : 0
+  } catch (err) {
+    FILE_ENABLED = false // 目录建不出来就退化为只打控制台，不能因为日志把服务搞挂
+    process.stderr.write(`[logger] 无法初始化日志文件 ${LOG_FILE}: ${err?.message}\n`)
+  }
+}
+
+/** 大小轮转：backend.log → backend.log.1 → .2 → .3，最旧的丢弃 */
+function rotateIfNeeded(nextLength) {
+  if (fileSize + nextLength <= MAX_FILE_BYTES) return
+  try {
+    if (BACKUPS > 0) {
+      rmSync(`${LOG_FILE}.${BACKUPS}`, { force: true })
+      for (let i = BACKUPS - 1; i >= 1; i -= 1) {
+        if (existsSync(`${LOG_FILE}.${i}`)) renameSync(`${LOG_FILE}.${i}`, `${LOG_FILE}.${i + 1}`)
+      }
+      if (existsSync(LOG_FILE)) renameSync(LOG_FILE, `${LOG_FILE}.1`)
+    } else {
+      rmSync(LOG_FILE, { force: true })
+    }
+    fileSize = 0
+  } catch (err) {
+    if (!fileErrorReported) {
+      fileErrorReported = true
+      process.stderr.write(`[logger] 日志轮转失败 ${LOG_FILE}: ${err?.message}\n`)
+    }
+  }
+}
+
+/**
+ * 写文件。用同步写是为了保证进程崩溃（uncaughtException）前最后几条日志真的落盘；
+ * 本项目日志量很小，同步写带来的阻塞可以忽略。
+ */
+function writeFile(line) {
+  if (!FILE_ENABLED) return
+  try {
+    const bytes = Buffer.byteLength(line) + 1
+    rotateIfNeeded(bytes)
+    appendFileSync(LOG_FILE, line + '\n')
+    fileSize += bytes
+  } catch (err) {
+    // 只报一次，避免磁盘满时每次写日志都刷屏（递归风险）
+    if (!fileErrorReported) {
+      fileErrorReported = true
+      process.stderr.write(`[logger] 写入日志文件失败 ${LOG_FILE}: ${err?.message}\n`)
+    }
+  }
+}
 
 /** 命中这些键名的值不回显（只保留长度），避免 token 泄漏到日志 */
 const SENSITIVE_KEY = /^(token|authorization|cookie|password|secret|api[-_]?key|contentBase64)$/i
@@ -78,6 +150,8 @@ export class Logger {
       ...normalize(data),
     }
 
+    // 文件里永远是 JSON（便于 grep/jq），控制台按 LITEOFFICE_LOG_FORMAT 决定
+    writeFile(JSON.stringify(payload))
     emit(level, JSON_MODE ? JSON.stringify(payload) : formatText(payload))
   }
 }
@@ -168,4 +242,4 @@ export function newRequestId() {
   return randomUUID()
 }
 
-export { LEVELS, MIN_LEVEL, JSON_MODE }
+export { LEVELS, MIN_LEVEL, JSON_MODE, LOG_FILE, FILE_ENABLED }

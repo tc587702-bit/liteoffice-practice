@@ -33,6 +33,7 @@ from .graph import run_agent
 from .tools import run_tool, tool_manifest
 from .errors import AppError, BadRequest, RateLimited, Unauthorized
 from .error_handlers import install_error_handlers
+from . import logging_conf
 from .logging_conf import get_logger, request_id_ctx, setup_logging
 
 API_TOKEN = os.getenv("LITEOFFICE_API_TOKEN", "")
@@ -53,6 +54,7 @@ async def lifespan(_: FastAPI):
         authEnabled=bool(API_TOKEN),
         adminAuthEnabled=bool(os.getenv("LITEOFFICE_ADMIN_TOKEN", "")),
         llm=llm_info(),
+        logFile=str(logging_conf.LOG_FILE) if logging_conf.LOG_FILE else "-",
     )
     try:
         stats = KB.kb_stats(os.getenv("LITEOFFICE_KB_ID", "kb_shared"))

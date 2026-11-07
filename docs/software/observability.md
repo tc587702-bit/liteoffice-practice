@@ -61,11 +61,37 @@ LITEOFFICE_LOG_FORMAT=text uvicorn app.main:app --port 8100   # Agent
 | 变量 | 默认 | 说明 |
 |---|---|---|
 | `LITEOFFICE_LOG_LEVEL` | `info` | `debug`/`info`/`warn`/`error`/`silent` |
-| `LITEOFFICE_LOG_FORMAT` | `json` | `json` 或 `text` |
+| `LITEOFFICE_LOG_FORMAT` | `json` | `json` 或 `text`（只影响控制台，文件永远是 JSON） |
+| `LITEOFFICE_LOG_FILE` | 各自 `logs/*.log` | 落盘路径；设为 `off` 关闭落盘 |
+| `LITEOFFICE_LOG_MAX_BYTES` | `10485760` | 单个日志文件上限，超过即轮转 |
+| `LITEOFFICE_LOG_BACKUPS` | `3` | 保留的历史文件数（`.1` ~ `.N`） |
 | `LITEOFFICE_SERVICE_NAME` | 各自默认 | 日志里的 `service` 字段，容器部署时便于区分 |
 | `VITE_LOG_ENDPOINT` | 未设置 | 前端 error 级日志的远程上报地址（`sendBeacon` POST） |
 
-### 2.4 脱敏
+### 2.4 落盘
+
+后端与 Agent **默认写文件**，无需任何配置：
+
+| 服务 | 默认文件 | 轮转 |
+|---|---|---|
+| 后端 | `code/backend/logs/backend.log` | 到 10 MB → `backend.log.1` → `.2` → `.3`，最旧丢弃 |
+| Agent | `code/agent/logs/agent.log` | 到 10 MB → `agent.log.1` → `.2` → `.3` |
+| 前端 | 无（浏览器不允许直接写盘） | 用「下载诊断信息」或控制台的 `__liteofficeDiagnose()` |
+
+- 两个 `logs/` 目录都在 `.gitignore` 里，不会误提交。
+- 文件内容**始终是 JSON Lines**，与 `LITEOFFICE_LOG_FORMAT` 无关，方便 `jq` 处理。
+- 后端用同步追加写（`appendFileSync`），保证进程崩溃时最后几条日志已经落盘；
+  Agent 用 `RotatingFileHandler`，天然支持按大小轮转。
+- 写文件失败（磁盘满 / 无权限）**不会影响服务**：只向 stderr 报一次，然后继续打控制台。
+
+查日志：
+
+```bash
+tail -f code/backend/logs/backend.log | jq -c '{ts, level, msg, requestId, code}'
+grep '"level":"error"' code/agent/logs/agent.log | jq -r '.msg' | sort | uniq -c | sort -rn
+```
+
+### 2.5 脱敏
 
 后端 `logger.mjs`、Agent `logging_conf.py` 都会自动把下列键名的值替换为 `<redacted:N>`：
 
@@ -223,5 +249,6 @@ LITEOFFICE_LOG_LEVEL=debug LITEOFFICE_LOG_FORMAT=text uvicorn app.main:app --por
 这三条自检在本次改造后全部通过；日志本身另做了人工验证：
 
 - 后端：一次完整 smoke 跑出 20+ 条 JSON 日志，`requestId` 可与响应头对齐，token 字段显示 `<redacted:8>`
+- 落盘：后端与 Agent 的 `logs/*.log` 均实际生成；把 `LITEOFFICE_LOG_MAX_BYTES` 调到 1200 后确认轮转出 `.1` / `.2`
 - Agent：`422` / `400` / `429` / `500` / `502` 五种错误的响应体与日志均符合本文约定
 - 前端：构建产物中 `logger` 被正确 tree-shake 进主包，生产环境仅输出 error

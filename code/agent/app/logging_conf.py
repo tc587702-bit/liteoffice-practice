@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import logging
+import logging.handlers
 import os
 import sys
 import time
@@ -27,12 +28,22 @@ import traceback
 import uuid
 from contextlib import contextmanager
 from contextvars import ContextVar
+from pathlib import Path
 from typing import Any, Iterator
 
 SERVICE_NAME = os.getenv("LITEOFFICE_SERVICE_NAME", "liteoffice-agent")
 
 #: 当前请求 ID；中间件写入，日志过滤器读取，保证同一次请求的日志能聚合
 request_id_ctx: ContextVar[str] = ContextVar("request_id", default="-")
+
+#: 默认落盘位置 code/agent/logs/agent.log（已在 .gitignore 里）
+_DEFAULT_LOG_FILE = Path(__file__).resolve().parents[1] / "logs" / "agent.log"
+#: 单文件上限与保留份数（agent.log.1 ~ .3）
+_MAX_FILE_BYTES = int(os.getenv("LITEOFFICE_LOG_MAX_BYTES", str(10 * 1024 * 1024)))
+_BACKUPS = int(os.getenv("LITEOFFICE_LOG_BACKUPS", "3"))
+
+#: 实际使用的日志文件路径；None 表示只输出到控制台
+LOG_FILE: Path | None = None
 
 _SENSITIVE_KEYS = {
     "token",
@@ -118,8 +129,20 @@ class TextFormatter(logging.Formatter):
         return line
 
 
+def _resolve_log_file() -> Path | None:
+    """LITEOFFICE_LOG_FILE 未设置时用默认路径；设为 off/none 等则关闭落盘。"""
+    raw = os.getenv("LITEOFFICE_LOG_FILE")
+    if raw is None:
+        return _DEFAULT_LOG_FILE
+    value = raw.strip()
+    if value.lower() in {"", "off", "false", "0", "none", "disable", "disabled"}:
+        return None
+    return Path(value).expanduser()
+
+
 def setup_logging(level: str | None = None) -> None:
-    """初始化根 logger。重复调用安全（幂等）。"""
+    """初始化根 logger：控制台 + 文件（默认开启）。重复调用安全（幂等）。"""
+    global LOG_FILE
     root = logging.getLogger()
     if getattr(root, "_liteoffice_configured", False):
         return
@@ -128,21 +151,55 @@ def setup_logging(level: str | None = None) -> None:
     root.setLevel(getattr(logging, chosen, logging.INFO))
 
     fmt = os.getenv("LITEOFFICE_LOG_FORMAT", "json").lower()
-    handler = logging.StreamHandler(stream=sys.stdout)
-    handler.setFormatter(JsonFormatter() if fmt != "text" else TextFormatter())
-    handler.addFilter(RequestIdFilter())
+    console = logging.StreamHandler(stream=sys.stdout)
+    console.setFormatter(JsonFormatter() if fmt != "text" else TextFormatter())
+    console.addFilter(RequestIdFilter())
 
-    root.handlers = [handler]
-    # uvicorn 的启动/错误日志与业务日志保持同一格式
+    handlers: list[logging.Handler] = [console]
+
+    # 文件里永远是 JSON Lines（便于 grep / jq），与控制台格式解耦
+    target = _resolve_log_file()
+    if target is not None:
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            file_handler = logging.handlers.RotatingFileHandler(
+                target,
+                maxBytes=max(_MAX_FILE_BYTES, 1024),
+                backupCount=max(_BACKUPS, 0),
+                encoding="utf-8",
+            )
+            file_handler.setFormatter(JsonFormatter())
+            file_handler.addFilter(RequestIdFilter())
+            handlers.append(file_handler)
+            LOG_FILE = target
+        except OSError as exc:
+            # 目录不可写等情况：退化为只打控制台，绝不能因为日志把服务搞挂
+            console.handle(
+                logging.LogRecord(
+                    name="logging_conf",
+                    level=logging.ERROR,
+                    pathname=__file__,
+                    lineno=0,
+                    msg=f"无法初始化日志文件 {target}: {exc}",
+                    args=(),
+                    exc_info=None,
+                )
+            )
+
+    root.handlers = handlers
+    # uvicorn 的启动/错误日志与业务日志保持同一格式（含文件）
     for name in ("uvicorn", "uvicorn.error"):
         lg = logging.getLogger(name)
-        lg.handlers = [handler]
+        lg.handlers = handlers
         lg.propagate = False
     # 访问日志由 main 的中间件统一输出（带 requestId / 耗时 / 状态码），
     # 关掉 uvicorn.access 以免同一请求出现两条重复日志
     logging.getLogger("uvicorn.access").disabled = True
 
     root._liteoffice_configured = True  # type: ignore[attr-defined]
+
+    if LOG_FILE is not None:
+        get_logger("logging").info("日志文件已启用", file=str(LOG_FILE))
 
 
 class BoundLogger:

@@ -72,9 +72,11 @@ src/
 ## 日志与错误处理
 
 - **日志**：`createLogger('scope')` 输出 `debug/info/warn/error`；开发环境全量进控制台，
-  生产环境只输出 `error`，但**始终**保留最近 300 条在内存里。
+  生产环境只输出 `error`，但**始终**保留最近 300 条在内存里。浏览器不能直接写硬盘，
+  需要落盘时用下面的「导出诊断」下载成 txt。
 - **导出诊断**：`collectDiagnostics()` 把 UA / 视口 / 地址 / 日志打包成 txt；
-  错误边界页上有「下载诊断信息」按钮，开发期也可在控制台执行 `__liteofficeLogs()`。
+  错误边界页上有「下载诊断信息」按钮；控制台随时可执行 `__liteofficeDiagnose()`
+  直接下载诊断文件，或 `__liteofficeLogs()` 打印纯文本。
 - **全局兜底**：`installGlobalErrorHandlers(app, router)`（`main.ts` 中先于 `mount` 调用）
   接管 Vue 渲染错误、`window.onerror`、`unhandledrejection`、路由错误。
 - **远程上报（可选）**：设置 `VITE_LOG_ENDPOINT` 后，`error` 级日志用 `sendBeacon` 上报，
