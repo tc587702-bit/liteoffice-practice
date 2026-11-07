@@ -191,7 +191,7 @@ function openDoc(id: string) {
                   class="relative mt-4 inline-flex items-center gap-1.5 rounded-lg bg-white/[0.06] px-2 py-1 text-[11px] text-[#A1A1A6]"
                 >
                   <AppIcon name="gauge" class="h-3 w-3" :stroke-width="2" />
-                  单文件 ≤ 4 MB
+                  不限制文件大小 · 不截断内容
                 </span>
               </button>
             </div>

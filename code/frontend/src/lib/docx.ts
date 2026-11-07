@@ -584,7 +584,7 @@ export interface DocxBlock {
 
 const W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
 
-function runsFromRunHtml(html: string): string {
+function runsFromRunHtml(html: string, ctx?: BuildContext): string {
   // 极简解析 <strong>/<em>/<u> 包装，以 w:rPr 表达格式
   const doc = new DOMParser().parseFromString(`<div id="r">${html}</div>`, 'text/html')
   const root = doc.getElementById('r')
@@ -606,6 +606,10 @@ function runsFromRunHtml(html: string): string {
       const tag = el.tagName.toLowerCase()
       if (tag === 'br') {
         out.push('<w:r><w:br/></w:r>')
+        return
+      }
+      if (tag === 'img' && ctx) {
+        out.push(imageRunXml(el, ctx))
         return
       }
       walk(el, {
@@ -641,11 +645,207 @@ function numberingDefinitions() {
 </w:numbering>`
 }
 
-/** 把编辑后的 HTML 转成 docx 二进制（保留标题层级、列表、表格）。 */
-export function buildDocx(html: string, title = '文档'): Uint8Array {
+/* ---------------- 图片写回（buildDocx 专用） ---------------- */
+
+const WP_NS = 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing'
+const A_NS = 'http://schemas.openxmlformats.org/drawingml/2006/main'
+const PIC_NS = 'http://schemas.openxmlformats.org/drawingml/2006/picture'
+const EMU_PER_PX_EMBED = 9525
+const DEFAULT_IMAGE_WIDTH_PX = 600
+
+/** 导出报告：让调用方（自检脚本 / 界面提示）拿到被跳过的图片，不静默丢弃 */
+export interface DocxExportReport {
+  imagesEmbedded: number
+  imagesSkipped: { src: string; reason: string }[]
+  extensions: string[]
+}
+
+interface MediaEntry {
+  fileName: string
+  bytes: Uint8Array
+  ext: 'png' | 'jpeg' | 'gif'
+}
+
+interface BuildContext {
+  media: MediaEntry[]
+  rels: { id: string; target: string }[]
+  nextRelId: number
+  nextDrawingId: number
+  report: DocxExportReport
+}
+
+const IMAGE_MIME_BY_EXT: Record<string, string> = {
+  png: 'image/png',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+}
+
+function emptyReport(): DocxExportReport {
+  return { imagesEmbedded: 0, imagesSkipped: [], extensions: [] }
+}
+
+/** data URL → 真实二进制；非 base64 / 非支持的 MIME 返回原因 */
+function decodeDataUrl(src: string): { bytes: Uint8Array; ext: 'png' | 'jpeg' | 'gif' } | { reason: string } {
+  const trimmed = src.trim()
+  if (!/^data:/i.test(trimmed)) return { reason: '不是 data URL（外链图片不会写进 docx）' }
+  const match = /^data:([^;,]+)(?:;[^,]*)?;base64,([\s\S]+)$/i.exec(trimmed)
+  if (!match) return { reason: '不是 base64 编码的 data URL' }
+  const mime = match[1].toLowerCase()
+  const ext =
+    mime === 'image/png'
+      ? 'png'
+      : mime === 'image/jpeg' || mime === 'image/jpg'
+        ? 'jpeg'
+        : mime === 'image/gif'
+          ? 'gif'
+          : ''
+  if (!ext) return { reason: `${mime} 暂不支持写回（仅支持 png / jpeg / gif）` }
+  try {
+    const binary = atob(match[2].replace(/\s/g, ''))
+    const bytes = new Uint8Array(binary.length)
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+    if (!bytes.length) return { reason: '图片二进制为空' }
+    return { bytes, ext: ext as 'png' | 'jpeg' | 'gif' }
+  } catch {
+    return { reason: 'base64 解码失败' }
+  }
+}
+
+/** 从文件头读像素尺寸（PNG / GIF / JPEG），读不到返回 null */
+function readImageSize(bytes: Uint8Array, ext: 'png' | 'jpeg' | 'gif'): { width: number; height: number } | null {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  try {
+    if (ext === 'png') {
+      if (bytes.length < 24) return null
+      const width = view.getUint32(16)
+      const height = view.getUint32(20)
+      return width > 0 && height > 0 ? { width, height } : null
+    }
+    if (ext === 'gif') {
+      if (bytes.length < 10) return null
+      const width = view.getUint16(6, true)
+      const height = view.getUint16(8, true)
+      return width > 0 && height > 0 ? { width, height } : null
+    }
+    // JPEG：扫描 SOFn 段
+    let offset = 2
+    while (offset + 9 < bytes.length) {
+      if (bytes[offset] !== 0xff) {
+        offset++
+        continue
+      }
+      const marker = bytes[offset + 1]
+      if (marker === 0xd8 || marker === 0xd9 || (marker >= 0xd0 && marker <= 0xd7)) {
+        offset += 2
+        continue
+      }
+      const length = view.getUint16(offset + 2)
+      const isSof = marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc
+      if (isSof) {
+        const height = view.getUint16(offset + 5)
+        const width = view.getUint16(offset + 7)
+        return width > 0 && height > 0 ? { width, height } : null
+      }
+      if (length < 2) return null
+      offset += 2 + length
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+/** 像素 → EMU，保证不出现 0 或负值 */
+function emuFromPx(px: number): number {
+  return Math.max(EMU_PER_PX_EMBED, Math.round(Math.max(1, px) * EMU_PER_PX_EMBED))
+}
+
+/** 计算落盘尺寸：优先 width/height 属性，缺失按 600px 宽等比 */
+function imageDisplaySize(el: HTMLElement, bytes: Uint8Array, ext: 'png' | 'jpeg' | 'gif') {
+  const natural = readImageSize(bytes, ext)
+  const attrWidth = Number(el.getAttribute('width'))
+  const attrHeight = Number(el.getAttribute('height'))
+  let width = Number.isFinite(attrWidth) && attrWidth > 0 ? attrWidth : 0
+  let height = Number.isFinite(attrHeight) && attrHeight > 0 ? attrHeight : 0
+  const ratio = natural ? natural.height / natural.width : 0.75
+  if (!width && !height) {
+    width = DEFAULT_IMAGE_WIDTH_PX
+    height = Math.round(DEFAULT_IMAGE_WIDTH_PX * ratio)
+  } else if (!width) {
+    width = Math.round(height / ratio)
+  } else if (!height) {
+    height = Math.round(width * ratio)
+  }
+  return { width: Math.max(1, Math.round(width)), height: Math.max(1, Math.round(height)) }
+}
+
+/** 生成 <w:r><w:drawing><wp:inline>…<a:blip r:embed="rIdN"/></w:drawing></w:r> */
+function imageRunXml(el: HTMLElement, ctx: BuildContext): string {
+  const src = el.getAttribute('src') ?? ''
+  const alt = el.getAttribute('alt') ?? ''
+  const decoded = decodeDataUrl(src)
+  if ('reason' in decoded) {
+    ctx.report.imagesSkipped.push({ src: src.slice(0, 64), reason: decoded.reason })
+    return `<w:r><w:t xml:space="preserve">[图片未导出：${escapeXml(decoded.reason)}]</w:t></w:r>`
+  }
+
+  const index = ctx.media.length + 1
+  const fileName = `image${index}.${decoded.ext}`
+  const relId = `rId${ctx.nextRelId++}`
+  const drawingId = ctx.nextDrawingId++
+  const { width, height } = imageDisplaySize(el, decoded.bytes, decoded.ext)
+  const cx = emuFromPx(width)
+  const cy = emuFromPx(height)
+
+  ctx.media.push({ fileName, bytes: decoded.bytes, ext: decoded.ext })
+  ctx.rels.push({ id: relId, target: `media/${fileName}` })
+  ctx.report.imagesEmbedded += 1
+  if (!ctx.report.extensions.includes(decoded.ext)) ctx.report.extensions.push(decoded.ext)
+
+  return [
+    '<w:r><w:drawing>',
+    '<wp:inline distT="0" distB="0" distL="0" distR="0">',
+    `<wp:extent cx="${cx}" cy="${cy}"/>`,
+    '<wp:effectExtent l="0" t="0" r="0" b="0"/>',
+    `<wp:docPr id="${drawingId}" name="Picture ${drawingId}"${alt ? ` descr="${escapeXml(alt)}"` : ''}/>`,
+    '<wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr>',
+    `<a:graphic><a:graphicData uri="${PIC_NS}">`,
+    '<pic:pic>',
+    `<pic:nvPicPr><pic:cNvPr id="${drawingId}" name="${fileName}"/><pic:cNvPicPr/></pic:nvPicPr>`,
+    `<pic:blipFill><a:blip r:embed="${relId}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>`,
+    `<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm>`,
+    '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>',
+    '</pic:pic></a:graphicData></a:graphic>',
+    '</wp:inline></w:drawing></w:r>',
+  ].join('')
+}
+
+/** 统计已有 document.xml.rels 里的 rId，避免新 Id 冲突 */
+function nextRelationshipId(xml: string): number {
+  let max = 0
+  const re = /Id="rId(\d+)"/g
+  let match: RegExpExecArray | null
+  while ((match = re.exec(xml))) max = Math.max(max, Number(match[1]))
+  return max + 1
+}
+
+/** 把编辑后的 HTML 转成 docx 二进制（保留标题层级、列表、表格、内嵌图片）。 */
+export function buildDocx(html: string, title = '文档', report?: DocxExportReport): Uint8Array {
   const doc = new DOMParser().parseFromString(`<div id="root">${html}</div>`, 'text/html')
   const root = doc.getElementById('root')
   const bodyXml: string[] = []
+  const ctx: BuildContext = {
+    media: [],
+    rels: [],
+    nextRelId: nextRelationshipId(DOC_RELS),
+    nextDrawingId: 1,
+    report: report ?? emptyReport(),
+  }
+  if (report) {
+    report.imagesEmbedded = 0
+    report.imagesSkipped = []
+    report.extensions = []
+  }
   if (root) {
     Array.from(root.childNodes).forEach((node) => {
       if (node.nodeType === 3) {
@@ -660,7 +860,7 @@ export function buildDocx(html: string, title = '文档'): Uint8Array {
       if (heading) {
         const level = Number(heading[1])
         bodyXml.push(
-          `<w:p><w:pPr><w:pStyle w:val="Heading${level}"/><w:outlineLvl w:val="${level - 1}"/></w:pPr>${runsFromRunHtml(el.innerHTML)}</w:p>`,
+          `<w:p><w:pPr><w:pStyle w:val="Heading${level}"/><w:outlineLvl w:val="${level - 1}"/></w:pPr>${runsFromRunHtml(el.innerHTML, ctx)}</w:p>`,
         )
         return
       }
@@ -668,7 +868,7 @@ export function buildDocx(html: string, title = '文档'): Uint8Array {
         const numId = tag === 'ol' ? 2 : 1
         Array.from(el.querySelectorAll('li')).forEach((li) => {
           bodyXml.push(
-            `<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="${numId}"/></w:numPr></w:pPr>${runsFromRunHtml(li.innerHTML)}</w:p>`,
+            `<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="${numId}"/></w:numPr></w:pPr>${runsFromRunHtml(li.innerHTML, ctx)}</w:p>`,
           )
         })
         return
@@ -680,7 +880,7 @@ export function buildDocx(html: string, title = '文档'): Uint8Array {
             const tds = Array.from(row.children)
               .map(
                 (cell) =>
-                  `<w:tc><w:tcPr><w:tcW w:w="0" w:type="auto"/></w:tcPr><w:p>${runsFromRunHtml(cell.innerHTML) || '<w:r><w:t></w:t></w:r>'}</w:p></w:tc>`,
+                  `<w:tc><w:tcPr><w:tcW w:w="0" w:type="auto"/></w:tcPr><w:p>${runsFromRunHtml(cell.innerHTML, ctx) || '<w:r><w:t></w:t></w:r>'}</w:p></w:tc>`,
               )
               .join('')
             return `<w:tr>${tds}</w:tr>`
@@ -697,26 +897,43 @@ export function buildDocx(html: string, title = '文档'): Uint8Array {
         return
       }
       if (tag === 'img') {
-        // 图片无法在回写中可靠保留，写入占位段落
-        bodyXml.push(`<w:p><w:r><w:t xml:space="preserve">[图片：${escapeXml(el.getAttribute('alt') ?? '未命名')}]</w:t></w:r></w:p>`)
+        // 图片写成真实 media + 关系 + w:drawing（不再用占位文字）
+        const run = imageRunXml(el, ctx)
+        bodyXml.push(run ? `<w:p>${run}</w:p>` : '')
         return
       }
-      const runs = runsFromRunHtml(el.innerHTML)
+      const runs = runsFromRunHtml(el.innerHTML, ctx)
       if (runs) bodyXml.push(`<w:p>${runs}</w:p>`)
     })
   }
   if (!bodyXml.length) bodyXml.push(`<w:p><w:r><w:t>${escapeXml(title)}</w:t></w:r></w:p>`)
 
   const documentXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:document xmlns:w="${W_NS}" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:body>${bodyXml.join('')}<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/></w:sectPr></w:body></w:document>`
+<w:document xmlns:w="${W_NS}" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="${WP_NS}" xmlns:a="${A_NS}" xmlns:pic="${PIC_NS}"><w:body>${bodyXml.join('')}<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/></w:sectPr></w:body></w:document>`
+
+  const contentTypeDefaults = ctx.report.extensions
+    .map((ext) => `<Default Extension="${ext}" ContentType="${IMAGE_MIME_BY_EXT[ext]}"/>`)
+    .join('')
+  const contentTypes = contentTypeDefaults
+    ? CONTENT_TYPES.replace('</Types>', `${contentTypeDefaults}</Types>`)
+    : CONTENT_TYPES
+
+  const imageRelationships = ctx.rels
+    .map(
+      (rel) =>
+        `<Relationship Id="${rel.id}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="${rel.target}"/>`,
+    )
+    .join('')
+  const docRels = imageRelationships ? DOC_RELS.replace('</Relationships>', `${imageRelationships}</Relationships>`) : DOC_RELS
 
   return zip([
-    { name: '[Content_Types].xml', content: CONTENT_TYPES },
+    { name: '[Content_Types].xml', content: contentTypes },
     { name: '_rels/.rels', content: ROOT_RELS },
     { name: 'word/document.xml', content: documentXml },
     { name: 'word/styles.xml', content: STYLES_XML },
     { name: 'word/numbering.xml', content: numberingDefinitions() },
-    { name: 'word/_rels/document.xml.rels', content: DOC_RELS },
+    { name: 'word/_rels/document.xml.rels', content: docRels },
+    ...ctx.media.map((entry) => ({ name: `word/media/${entry.fileName}`, content: entry.bytes })),
     { name: 'docProps/core.xml', content: CORE_XML },
     { name: 'docProps/app.xml', content: APP_XML },
   ])

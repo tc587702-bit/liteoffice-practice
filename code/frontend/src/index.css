@@ -532,6 +532,17 @@ body {
   word-break: break-word;
 }
 
+/* 屏幕外的块跳过布局与绘制（浏览器级虚拟化，配合分块渲染把大文档成本压到可视区） */
+.lo-editor > * {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 24px;
+}
+
+/* 大图在滚到可视区前不解码 */
+.lo-editor img {
+  content-visibility: auto;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

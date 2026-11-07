@@ -13,7 +13,7 @@ export interface SheetData {
   rowNumbers: number[]
   columnLabels: string[]
   truncated: boolean
-  /** 已截断时的完整说明，如「已截断，仅显示前 20000 行（共 128416 行）」 */
+  /** 兼容字段：不再产生截断，恒为 undefined */
   truncatedNote?: string
   /** 实际装进内存的行数 */
   shownRows?: number
@@ -22,9 +22,9 @@ export interface SheetData {
 }
 
 export interface XlsxParseOptions {
-  /** 回退解析器最多装载的行数（默认 20000） */
+  /** 已废弃：不再有装载上限，保留字段只为兼容旧调用 */
   maxRows?: number
-  /** 回退解析器最多装载的单元格数（默认 400000，防止宽表拖死主线程） */
+  /** 已废弃：不再有装载上限 */
   maxCells?: number
   signal?: AbortSignal
   onProgress?: (progress: { done: number; total: number; sheet: string; rows: number }) => void
@@ -57,13 +57,7 @@ export interface PersistedSheet {
   shownRows?: number
 }
 
-const MAX_ROWS = 4000
-const MAX_COLS = 200
-/** 回退解析器的装载上限：显式提示后仍然只占用可控内存 */
-export const FALLBACK_MAX_ROWS = 20000
-export const FALLBACK_MAX_CELLS = 400000
-/** 超过 2 MB 的工作簿需要用户确认后再解析 */
-export const LARGE_XLSX_BYTES = 2 * 1024 * 1024
+/* 装载策略：不再按行/列/字节做任何截断；内存压力由 store 的分级提示与 OOM 兜底处理 */
 
 export const columnLabel = (index: number): string => {
   let n = index + 1
@@ -157,10 +151,9 @@ function yieldToUi(): Promise<void> {
 async function parseSheetXml(
   xml: Document | null,
   shared: string[],
-  maxRows: number = MAX_ROWS,
   options: RowWalkOptions = {},
-): Promise<{ rows: PersistedRow[]; totalRows: number; totalCols: number; truncated: boolean }> {
-  if (!xml) return { rows: [], totalRows: 0, totalCols: 0, truncated: false }
+): Promise<{ rows: PersistedRow[]; totalRows: number; totalCols: number }> {
+  if (!xml) return { rows: [], totalRows: 0, totalCols: 0 }
   const root = xml.documentElement
   const data = firstChild(root, 'sheetData') ?? root
   // 大文件热路径：sheetData / row 的子元素是直接子节点，用 childElements 避免递归全树扫描
@@ -178,7 +171,6 @@ async function parseSheetXml(
     const r = Number(attr(rowEl, 'r') ?? `${index + 1}`)
     index++
     lastRow = Math.max(lastRow, r)
-    if (rows.length >= maxRows) continue
     const cells: string[] = []
     let colCursor = 0
     childElements(rowEl, 'c').forEach((cell) => {
@@ -186,7 +178,6 @@ async function parseSheetXml(
       const col = ref ? columnIndex(ref) : null
       const target = col ?? colCursor
       colCursor = target + 1
-      if (target >= MAX_COLS) return
       while (cells.length < target) cells.push('')
       try {
         cells[target] = cellValue(cell, shared)
@@ -210,7 +201,7 @@ async function parseSheetXml(
     }
   }
 
-  return { rows, totalRows: lastRow || rows.length, totalCols, truncated: rowEls.length > maxRows }
+  return { rows, totalRows: lastRow || rows.length, totalCols }
 }
 
 function toSheetData(name: string, parsed: Awaited<ReturnType<typeof parseSheetXml>>): SheetData {
@@ -219,68 +210,79 @@ function toSheetData(name: string, parsed: Awaited<ReturnType<typeof parseSheetX
     rows: parsed.rows.map((row) => row.cells),
     rowNumbers: parsed.rows.map((row) => row.r),
     columnLabels: Array.from({ length: parsed.totalCols }, (_, i) => columnLabel(i)),
-    truncated: parsed.truncated,
+    truncated: false,
     totalRows: parsed.totalRows,
     totalCols: parsed.totalCols,
   }
 }
 
-/** 解析 xlsx：优先用运行时加载的 xlsx 模块（主路径保持不变），失败时回退到内置 XML 解析。 */
-export async function parseXlsx(buffer: ArrayBuffer, options: XlsxParseOptions = {}): Promise<XlsxParseResult> {
+/**
+ * 只走 SheetJS 主路径（不碰 DOM，可在 Web Worker 内运行）。
+ * 全量读取，不按行/列裁剪。
+ */
+export async function parseXlsxWithSheetJS(
+  buffer: ArrayBuffer,
+  options: XlsxParseOptions = {},
+): Promise<XlsxParseResult> {
   const warnings: string[] = []
-  try {
-    const { loadSheetJS } = await import('./sheetjs-loader')
-    const XLSX = await loadSheetJS()
-    const wb: WorkBookLike = XLSX.readAsync
-      ? await XLSX.readAsync(buffer)
-      : XLSX.read(buffer, { type: 'array' })
-    const sheets: SheetData[] = []
-    wb.SheetNames.forEach((name) => {
-      const sheet = wb.Sheets[name] as Sheet | undefined
-      const rows: PersistedRow[] = []
-      let totalCols = 0
-      let range: { s: { r: number; c: number }; e: { r: number; c: number } } | null = null
-      try {
-        range = XLSX.utils.decode_range((sheet?.['!ref'] as string | undefined) ?? 'A1')
-      } catch {
-        range = null
-      }
-      if (sheet && range) {
-        const endRow = Math.min(range.e.r, range.s.r + MAX_ROWS - 1)
-        const endCol = Math.min(range.e.c, range.s.c + MAX_COLS - 1)
-        for (let r = range.s.r; r <= endRow; r++) {
-          const cells: string[] = []
-          for (let c = range.s.c; c <= endCol; c++) {
-            const raw = sheet[XLSX.utils.encode_cell({ r, c })]
-            const cell = raw && !Array.isArray(raw) ? (raw as SheetCell) : null
-            let value = ''
-            if (cell) {
-              if (cell.w !== undefined && cell.w !== null && cell.w !== '') value = String(cell.w)
-              else if (cell.v !== undefined && cell.v !== null) value = String(cell.v)
-            }
-            cells.push(value)
+  const { loadSheetJS } = await import('./sheetjs-loader')
+  const XLSX = await loadSheetJS()
+  const wb: WorkBookLike = XLSX.readAsync
+    ? await XLSX.readAsync(buffer)
+    : XLSX.read(buffer, { type: 'array' })
+  const sheets: SheetData[] = []
+  wb.SheetNames.forEach((name) => {
+    options.signal?.throwIfAborted()
+    const sheet = wb.Sheets[name] as Sheet | undefined
+    const rows: PersistedRow[] = []
+    let totalCols = 0
+    let range: { s: { r: number; c: number }; e: { r: number; c: number } } | null = null
+    try {
+      range = XLSX.utils.decode_range((sheet?.['!ref'] as string | undefined) ?? 'A1')
+    } catch {
+      range = null
+    }
+    if (sheet && range) {
+      for (let r = range.s.r; r <= range.e.r; r++) {
+        const cells: string[] = []
+        for (let c = range.s.c; c <= range.e.c; c++) {
+          const raw = sheet[XLSX.utils.encode_cell({ r, c })]
+          const cell = raw && !Array.isArray(raw) ? (raw as SheetCell) : null
+          let value = ''
+          if (cell) {
+            if (cell.w !== undefined && cell.w !== null && cell.w !== '') value = String(cell.w)
+            else if (cell.v !== undefined && cell.v !== null) value = String(cell.v)
           }
-          totalCols = Math.max(totalCols, cells.length)
-          rows.push({ r: r + 1, cells })
+          cells.push(value)
         }
+        totalCols = Math.max(totalCols, cells.length)
+        rows.push({ r: r + 1, cells })
       }
-      const totalRows = range ? range.e.r + 1 : rows.length + 1
-      const totalColsReal = range ? Math.max(totalCols, range.e.c + 1) : totalCols
-      sheets.push({
-        name,
-        rows: rows.map((row) => row.cells),
-        rowNumbers: rows.map((row) => row.r),
-        columnLabels: Array.from({ length: totalColsReal }, (_, i) => columnLabel(i)),
-        truncated: totalRows > MAX_ROWS || (range ? range.e.c + 1 > MAX_COLS : false),
-        totalRows,
-        totalCols: totalColsReal,
-      })
+    }
+    const totalRows = range ? range.e.r + 1 : rows.length + 1
+    const totalColsReal = range ? Math.max(totalCols, range.e.c + 1) : totalCols
+    sheets.push({
+      name,
+      rows: rows.map((row) => row.cells),
+      rowNumbers: rows.map((row) => row.r),
+      columnLabels: Array.from({ length: totalColsReal }, (_, i) => columnLabel(i)),
+      truncated: false,
+      totalRows,
+      totalCols: totalColsReal,
     })
-    if (!sheets.length) warnings.push('工作簿中没有工作表')
-    return { sheets, warnings }
-  } catch {
-    warnings.push('已切换内置解析器读取工作簿')
-    return parseXlsxFallback(buffer, warnings, options)
+    options.onProgress?.({ done: sheets.length, total: wb.SheetNames.length, sheet: name, rows: rows.length })
+  })
+  if (!sheets.length) warnings.push('工作簿中没有工作表')
+  return { sheets, warnings }
+}
+
+/** 解析 xlsx：优先 SheetJS（无 DOM，可放 Worker），失败时回退到内置 XML 解析。 */
+export async function parseXlsx(buffer: ArrayBuffer, options: XlsxParseOptions = {}): Promise<XlsxParseResult> {
+  try {
+    return await parseXlsxWithSheetJS(buffer, options)
+  } catch (error) {
+    if ((error as Error)?.name === 'AbortError') throw error
+    return parseXlsxFallback(buffer, ['已切换内置解析器读取工作簿'], options)
   }
 }
 
@@ -309,58 +311,6 @@ export async function inspectXlsxWorkbook(buffer: ArrayBuffer): Promise<XlsxInsp
 }
 
 /**
- * 只截取 <sheetData> 中前 maxRows 行（以及 maxCells 个单元格）再交给 DOMParser。
- * 这样大文件的 DOM 规模从百万节点降到可控范围，解析时间随之降到秒级。
- */
-function sliceSheetData(
-  xml: string,
-  maxRows: number,
-  maxCells: number,
-): { xml: string; shownRows: number; truncatedBy: '' | 'rows' | 'cells' } {
-  const open = xml.indexOf('<sheetData')
-  if (open < 0) return { xml, shownRows: 0, truncatedBy: '' }
-  const close = xml.indexOf('</sheetData>', open)
-  if (close < 0) return { xml, shownRows: 0, truncatedBy: '' }
-  const head = xml.slice(0, open)
-  const body = xml.slice(open, close)
-  const tail = xml.slice(close + '</sheetData>'.length)
-  const tag = /<row[\s>]|<c[\s>]/g
-  let rows = 0
-  let cells = 0
-  let lastRowStart = -1
-  let cutAt = -1
-  let truncatedBy: '' | 'rows' | 'cells' = ''
-  let match: RegExpExecArray | null
-  while ((match = tag.exec(body))) {
-    if (match[0].charAt(1) === 'r') {
-      if (rows >= maxRows) {
-        cutAt = match.index
-        truncatedBy = 'rows'
-        break
-      }
-      rows += 1
-      lastRowStart = match.index
-    } else {
-      if (cells + 1 > maxCells) {
-        cutAt = lastRowStart >= 0 ? lastRowStart : match.index
-        truncatedBy = 'cells'
-        rows = Math.max(0, rows - 1)
-        break
-      }
-      cells += 1
-    }
-  }
-  if (cutAt < 0) return { xml, shownRows: rows, truncatedBy: '' }
-  return { xml: head + body.slice(0, cutAt) + '</sheetData>' + tail, shownRows: rows, truncatedBy }
-}
-
-function truncationNote(shownRows: number, totalRows: number, by: '' | 'rows' | 'cells') {
-  const total = totalRows > shownRows ? totalRows : shownRows
-  const suffix = by === 'cells' ? '，受单元格上限限制' : ''
-  return `已截断，仅显示前 ${shownRows} 行（共 ${total} 行${suffix}）`
-}
-
-/**
  * 内置解析器：直接读 xl/worksheets/*.xml，不依赖第三方库。
  * 大文件保护：先按行/单元格上限裁剪 XML 文本，再解析；解析过程可中止、可上报进度。
  */
@@ -369,8 +319,6 @@ export async function parseXlsxFallback(
   warnings: string[] = [],
   options: XlsxParseOptions = {},
 ): Promise<XlsxParseResult> {
-  const maxRows = options.maxRows ?? FALLBACK_MAX_ROWS
-  const maxCells = options.maxCells ?? FALLBACK_MAX_CELLS
   const signal = options.signal
   signal?.throwIfAborted()
 
@@ -390,10 +338,9 @@ export async function parseXlsxFallback(
     signal?.throwIfAborted()
     try {
       const raw = entryText(archive, entry.path) ?? ''
-      const sliced = sliceSheetData(raw, maxRows, maxCells)
       options.onProgress?.({ done: index, total: order.length, sheet: `${entry.name} · 解析 XML`, rows: 0 })
       await yieldToUi()
-      const parsed = await parseSheetXml(parseXml(sliced.xml), shared, maxRows, {
+      const parsed = await parseSheetXml(parseXml(raw), shared, {
         signal,
         onProgress: (done, total) => {
           options.onProgress?.({
@@ -404,20 +351,14 @@ export async function parseXlsxFallback(
           })
         },
       })
-      const shownRows = parsed.rows.length
-      const truncated = sliced.truncatedBy !== '' || shownRows < parsed.totalRows
-      const note = truncated ? truncationNote(shownRows, parsed.totalRows, sliced.truncatedBy) : undefined
-      if (note) warnings.push(`工作表「${entry.name}」${note}`)
       const sheet = toSheetData(entry.name, parsed)
-      sheet.truncated = truncated
-      sheet.truncatedNote = note
-      sheet.shownRows = shownRows
+      sheet.shownRows = parsed.rows.length
       sheets.push(sheet)
       options.onProgress?.({
         done: index + 1,
         total: order.length,
         sheet: entry.name,
-        rows: shownRows,
+        rows: parsed.rows.length,
       })
     } catch (error) {
       if ((error as Error)?.name === 'AbortError') throw error

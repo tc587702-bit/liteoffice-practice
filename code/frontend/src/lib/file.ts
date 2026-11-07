@@ -4,8 +4,6 @@ import type { PersistedSheet } from './xlsx'
 
 export type FileKind = 'docx' | 'xlsx' | 'pptx' | 'md' | 'pdf' | 'unknown'
 
-export const MAX_FILE_BYTES = 4 * 1024 * 1024
-
 export const KIND_LABEL: Record<FileKind, string> = {
   docx: 'Word',
   xlsx: 'Excel',
@@ -47,33 +45,27 @@ export function formatTime(timestamp: number): string {
 }
 
 /* ------------------------------------------------------------------ */
-/* 文本解码：UTF-8 优先，严格失败回退 gb18030；单文件 4 MB 上限         */
+/* 文本解码：UTF-8 优先，严格失败回退 gb18030；不做任何字节截断        */
 /* ------------------------------------------------------------------ */
 
 export interface DecodeResult {
   text: string
   encoding: 'utf-8' | 'gb18030'
-  truncated: boolean
 }
 
 export function decodeText(buffer: ArrayBuffer): DecodeResult {
   let bytes = new Uint8Array(buffer)
-  let truncated = false
-  if (bytes.byteLength > MAX_FILE_BYTES) {
-    bytes = bytes.subarray(0, MAX_FILE_BYTES)
-    truncated = true
-  }
   // 去掉 BOM
   if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) bytes = bytes.subarray(3)
   try {
     const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
-    return { text, encoding: 'utf-8', truncated }
+    return { text, encoding: 'utf-8' }
   } catch {
     try {
       const text = new TextDecoder('gb18030', { fatal: false }).decode(bytes)
-      return { text, encoding: 'gb18030', truncated }
+      return { text, encoding: 'gb18030' }
     } catch {
-      return { text: new TextDecoder('utf-8').decode(bytes), encoding: 'utf-8', truncated }
+      return { text: new TextDecoder('utf-8').decode(bytes), encoding: 'utf-8' }
     }
   }
 }

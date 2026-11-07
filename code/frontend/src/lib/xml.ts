@@ -2,12 +2,17 @@ import { entryText, type ZipArchive } from './zip'
 
 export type XmlNode = Element
 
-const parser = new DOMParser()
+/** 惰性创建：模块可在无 DOM 环境（Web Worker）里被导入，只有真正解析 XML 时才需要 DOMParser */
+let parser: DOMParser | null = null
+function getParser(): DOMParser {
+  if (!parser) parser = new DOMParser()
+  return parser
+}
 
 /** 解析 XML 文本，失败返回 null（不抛错）。 */
 export function parseXml(text: string, mime: DOMParserSupportedType = 'application/xml'): Document | null {
   try {
-    const doc = parser.parseFromString(text, mime)
+    const doc = getParser().parseFromString(text, mime)
     if (doc.getElementsByTagName('parsererror').length > 0) return null
     return doc
   } catch {

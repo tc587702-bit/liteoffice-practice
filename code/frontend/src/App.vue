@@ -4,6 +4,7 @@ import FileDropProvider from './components/app/FileDropProvider.vue'
 import ImportProgress from './components/app/ImportProgress.vue'
 import Toaster from './components/app/Toaster.vue'
 import ConfirmDialog from './components/ui/ConfirmDialog.vue'
+import FatalDialog from './components/ui/FatalDialog.vue'
 </script>
 
 <template>
@@ -19,6 +20,7 @@ import ConfirmDialog from './components/ui/ConfirmDialog.vue'
       <ImportProgress />
       <Toaster />
       <ConfirmDialog />
+      <FatalDialog />
     </FileDropProvider>
   </ErrorBoundary>
 </template>

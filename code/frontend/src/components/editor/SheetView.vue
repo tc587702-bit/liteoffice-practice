@@ -35,9 +35,9 @@ const rows = computed(() => {
 
 const width = computed(() => Math.max(sheet.value?.totalCols ?? 0, 1))
 
-/* ---------------- 行虚拟化：20000 行 × 20 列不一次性建 40 万个 input ---------------- */
+/* ---------------- 行虚拟化：只保留可视区 ±200 行的 DOM ---------------- */
 const ROW_HEIGHT = 32
-const OVERSCAN = 8
+const OVERSCAN = 200
 const scrollRef = ref<HTMLElement | null>(null)
 const scrollTop = ref(0)
 const viewportHeight = ref(560)
@@ -95,12 +95,12 @@ function cellValue(cells: string[], col: number) {
   return cells[col] ?? ''
 }
 
-/** 截断必须显式标注：已截断，仅显示前 N 行（共 M 行） */
-function truncationLabel(target: PersistedSheet) {
-  if (target.truncatedNote) return target.truncatedNote
-  const shown = target.shownRows ?? target.rows.length
-  const total = Math.max(target.totalRows, shown)
-  return `已截断，仅显示前 ${shown} 行（共 ${total} 行）`
+/** 加载进度文案：不截断，只报告可视区位置 */
+function loadedLabel(target: PersistedSheet) {
+  const total = Math.max(target.totalRows, target.rows.length)
+  const loaded = target.rows.length
+  if (endIndex.value >= loaded) return `已加载全部内容：第 ${loaded.toLocaleString('en-US')} 行 / 共 ${total.toLocaleString('en-US')} 行`
+  return `已加载第 ${endIndex.value.toLocaleString('en-US')} 行 / 共 ${total.toLocaleString('en-US')} 行（滚动继续加载）`
 }
 </script>
 
@@ -132,10 +132,10 @@ function truncationLabel(target: PersistedSheet) {
       </div>
     </div>
 
-    <p v-if="sheet.truncated" class="flex flex-wrap items-center gap-1.5 text-[11.5px] text-[#FFB340]">
-      <AppIcon name="alert-triangle" class="h-3.5 w-3.5 shrink-0" />
-      <span class="font-medium">{{ truncationLabel(sheet) }}</span>
-      <span class="text-[#A1A1A6]">· 导出会按当前已加载的行回写，未加载的尾部数据不会写入</span>
+    <p class="flex flex-wrap items-center gap-1.5 text-[11.5px] text-[#98989D]">
+      <AppIcon name="table-2" class="h-3.5 w-3.5 shrink-0 text-[#30D158]" />
+      <span class="tabular-nums">{{ loadedLabel(sheet) }}</span>
+      <span class="text-[#636366]">· 全部行都在内存中，滚动不会丢失内容</span>
     </p>
 
     <div
@@ -189,8 +189,8 @@ function truncationLabel(target: PersistedSheet) {
       </table>
     </div>
     <p class="text-[11px] text-[#636366]">
-      当前渲染 {{ visibleRows.length }} 行（滚动时按需渲染，共 {{ rows.length }} 行），避免一次性创建
-      {{ rows.length * width }} 个输入框导致卡顿
+      当前 DOM 渲染 {{ visibleRows.length }} 行（可视区 ±{{ OVERSCAN }} 行），共 {{ rows.length.toLocaleString('en-US') }}
+      行 × {{ width }} 列；全部单元格都在内存中，可滚动到达最后一行
     </p>
   </div>
 </template>

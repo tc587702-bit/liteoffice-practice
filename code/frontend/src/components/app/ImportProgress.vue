@@ -23,6 +23,9 @@ const { job } = storeToRefs(store)
       <span class="shrink-0 text-[11px] tabular-nums text-[#A1A1A6]">{{ job.seconds }}s</span>
     </div>
     <p class="mt-1 truncate text-[11.5px] text-[#98989D]" :title="job.phase">{{ job.phase }}</p>
+    <p v-if="job.total > 0" class="mt-0.5 text-[10.5px] tabular-nums text-[#A1A1A6]">
+      已加载 {{ job.done.toLocaleString('en-US') }} / 共 {{ job.total.toLocaleString('en-US') }}
+    </p>
     <div class="mt-2 h-1 w-full overflow-hidden rounded-full bg-white/[0.08]">
       <div class="lo-indeterminate h-full w-1/3 rounded-full bg-[#0A84FF]" />
     </div>
@@ -36,7 +39,7 @@ const { job } = storeToRefs(store)
       >
         取消解析
       </button>
-      <span v-else class="text-[10.5px] text-[#636366]">超过 5 秒可取消</span>
+      <span v-else class="text-[10.5px] text-[#636366]">可随时取消</span>
     </div>
   </div>
 </template>

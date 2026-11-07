@@ -12,7 +12,7 @@ import { useFileDrop } from '../components/app/fileDropContext'
 import { outlineFromHtml, useWorkspaceStore } from '../stores/workspace'
 import { formatSize, KIND_EXT } from '../lib/file'
 import { downloadOriginal, exportDocument, exportTextCopy } from '../lib/exporter'
-import { htmlToPlainText } from '../lib/markdown'
+import { escapeHtml, htmlToPlainText } from '../lib/markdown'
 
 /* 大纲层级缩进：全部用静态类名，避免在模板里写内联 style 做布局 */
 const OUTLINE_INDENT = ['pl-[8px]', 'pl-[20px]', 'pl-[32px]', 'pl-[44px]', 'pl-[56px]', 'pl-[68px]']
@@ -36,6 +36,17 @@ const doc = computed(() => docs.value.find((item) => item.id === activeId.value)
 const html = computed(() => doc.value?.html ?? '')
 
 const editorRef = ref<HTMLDivElement | null>(null)
+const editorScrollRef = ref<HTMLElement | null>(null)
+
+/* ---------------- 虚拟滚动：DOM 只保留一个窗口，上下滚动时双向补块回收 ---------------- */
+const BLOCK_CHUNK = 800
+const MAX_DOM_BLOCKS = 2400
+const INITIAL_WINDOW = 800
+const totalBlocks = ref(0)
+const windowStart = ref(0)
+const windowEnd = ref(0)
+let blockSlices: string[] = []
+const renderedBlocks = computed(() => Math.max(0, windowEnd.value - windowStart.value))
 const activeMarks = ref<Record<string, boolean>>({})
 const undoDepth = ref(0)
 const redoDepth = ref(0)
@@ -61,7 +72,93 @@ onBeforeUnmount(() => {
   if (persistTimer) window.clearTimeout(persistTimer)
 })
 
-/** 切换文档时把编辑区内容同步成新文档内容（防止串内容） */
+/** 把整篇 HTML 拆成顶层块，供分块渲染与「编辑时只回写已渲染前缀」使用 */
+function splitBlocks(html: string): string[] {
+  if (!html) return []
+  const parsed = new DOMParser().parseFromString(`<div id="root">${html}</div>`, 'text/html')
+  const root = parsed.getElementById('root')
+  if (!root) return []
+  const blocks: string[] = []
+  root.childNodes.forEach((node) => {
+    if (node.nodeType === 3) {
+      const text = node.textContent ?? ''
+      if (text.trim()) blocks.push(`<p>${escapeHtml(text)}</p>`)
+      return
+    }
+    if (node.nodeType !== 1) return
+    blocks.push((node as HTMLElement).outerHTML)
+  })
+  return blocks
+}
+
+/** 图片懒解码：进入可视区前不解码，降低大文档首屏成本 */
+function markLazyImages(root: HTMLElement) {
+  root.querySelectorAll('img').forEach((img) => {
+    img.setAttribute('loading', 'lazy')
+    img.setAttribute('decoding', 'async')
+  })
+}
+
+/** 用 blockSlices 的 [windowStart, windowEnd) 重绘 DOM */
+function renderWindow() {
+  const node = editorRef.value
+  if (!node) return
+  node.innerHTML = blockSlices.slice(windowStart.value, windowEnd.value).join('')
+  markLazyImages(node)
+}
+
+/** 底部追加：往下滚时把后面的块补进 DOM，并把顶部超出的块回收 */
+function appendNextChunk() {
+  const node = editorRef.value
+  if (!node || windowEnd.value >= blockSlices.length) return
+  const nextEnd = Math.min(blockSlices.length, windowEnd.value + BLOCK_CHUNK)
+  node.insertAdjacentHTML('beforeend', blockSlices.slice(windowEnd.value, nextEnd).join(''))
+  windowEnd.value = nextEnd
+  markLazyImages(node)
+  recycleTop()
+}
+
+/** 顶部回填：往上滚时把前面的块补回来，并把底部超出的块回收 */
+function prependPrevChunk() {
+  const node = editorRef.value
+  const scroller = editorScrollRef.value
+  if (!node || !scroller || windowStart.value <= 0) return
+  const prevStart = Math.max(0, windowStart.value - BLOCK_CHUNK)
+  const before = node.offsetHeight
+  node.insertAdjacentHTML('afterbegin', blockSlices.slice(prevStart, windowStart.value).join(''))
+  windowStart.value = prevStart
+  markLazyImages(node)
+  // 保持视口位置不跳：把新增高度补到 scrollTop 上
+  scroller.scrollTop += node.offsetHeight - before
+  recycleBottom()
+}
+
+/** 回收顶部：整批移除并把高度差补回 scrollTop，只触发一次布局 */
+function recycleTop() {
+  const node = editorRef.value
+  const scroller = editorScrollRef.value
+  if (!node || !scroller) return
+  const overflow = windowEnd.value - windowStart.value - MAX_DOM_BLOCKS
+  if (overflow <= 0) return
+  const before = scroller.scrollHeight
+  const nodes = Array.from(node.children).slice(0, overflow)
+  for (const child of nodes) child.remove()
+  windowStart.value += overflow
+  scroller.scrollTop -= before - scroller.scrollHeight
+}
+
+/** 回收底部：同样整批移除 */
+function recycleBottom() {
+  const node = editorRef.value
+  if (!node) return
+  const overflow = windowEnd.value - windowStart.value - MAX_DOM_BLOCKS
+  if (overflow <= 0) return
+  const nodes = Array.from(node.children).slice(-overflow)
+  for (const child of nodes) child.remove()
+  windowEnd.value -= overflow
+}
+
+/** 切换文档时装载窗口头部 */
 function syncEditor() {
   const node = editorRef.value
   unsafeBlocked.value = false
@@ -71,7 +168,12 @@ function syncEditor() {
   redoDepth.value = 0
   if (!node) return
   const next = doc.value?.html ?? ''
-  if (node.innerHTML !== next) node.innerHTML = next
+  blockSlices = splitBlocks(next)
+  totalBlocks.value = blockSlices.length
+  windowStart.value = 0
+  windowEnd.value = Math.min(blockSlices.length, INITIAL_WINDOW)
+  renderWindow()
+  if (editorScrollRef.value) editorScrollRef.value.scrollTop = 0
 }
 
 watch(
@@ -79,6 +181,24 @@ watch(
   () => syncEditor(),
   { flush: 'post' },
 )
+
+/** 滚到接近底部/顶部时继续加载，保证任意位置都能滚到（内容 100% 可访问） */
+function onEditorScroll() {
+  const scroller = editorScrollRef.value
+  if (!scroller) return
+  if (scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 800) appendNextChunk()
+  else if (scroller.scrollTop < 400) prependPrevChunk()
+}
+
+/** 只把已渲染的窗口写回 blockSlices，窗口外的内容原样保留 */
+function syncRenderedPrefix() {
+  const node = editorRef.value
+  if (!node) return
+  const serialized = Array.from(node.children).map((child) => (child as HTMLElement).outerHTML)
+  const end = windowStart.value + serialized.length
+  blockSlices = [...blockSlices.slice(0, windowStart.value), ...serialized, ...blockSlices.slice(end)]
+  windowEnd.value = end
+}
 
 function refreshMarks() {
   if (typeof document === 'undefined') return
@@ -124,7 +244,8 @@ function persistNow(nextHtml: string, dirty = true) {
 function onInput() {
   const node = editorRef.value
   if (!node || !doc.value) return
-  const nextHtml = node.innerHTML
+  syncRenderedPrefix()
+  const nextHtml = blockSlices.join('')
   if (!skipHistory) {
     historyStack.undo.push(doc.value.html)
     if (historyStack.undo.length > 80) historyStack.undo.shift()
@@ -155,7 +276,11 @@ function ensureSelection() {
 function applyHtml(nextHtml: string) {
   const node = editorRef.value
   if (!node) return
-  node.innerHTML = nextHtml
+  blockSlices = splitBlocks(nextHtml)
+  totalBlocks.value = blockSlices.length
+  windowStart.value = 0
+  windowEnd.value = Math.min(blockSlices.length, MAX_DOM_BLOCKS)
+  renderWindow()
   persistNow(nextHtml, nextHtml !== (doc.value?.originalHtml ?? ''))
 }
 
@@ -303,8 +428,21 @@ function handleTextCopy() {
   })
 }
 
-const outline = computed(() => outlineFromHtml(html.value))
-const plain = computed(() => htmlToPlainText(html.value))
+/* 大纲与字数基于 DOM 解析，10 MB 文档要几百毫秒：延后计算，先把正文画出来 */
+const statsHtml = ref('')
+let statsTimer: number | null = null
+watch(
+  html,
+  (value) => {
+    if (statsTimer) window.clearTimeout(statsTimer)
+    statsTimer = window.setTimeout(() => {
+      statsHtml.value = value
+    }, 250)
+  },
+  { immediate: true },
+)
+const outline = computed(() => outlineFromHtml(statsHtml.value))
+const plain = computed(() => htmlToPlainText(statsHtml.value))
 const stats = computed(() => wordCount(plain.value))
 const filteredOutline = computed(() =>
   outline.value.filter((item) => !filter.value.trim() || item.text.includes(filter.value.trim())),
@@ -465,7 +603,11 @@ const isBinaryText = computed(() => doc.value?.kind === 'pptx' || doc.value?.kin
                 :can-redo="redoDepth > 0"
                 @command="onCommand"
               />
-              <div class="thin-scroll min-h-0 flex-1 overflow-y-auto bg-[#0B0B0C] px-4 py-5">
+              <div
+                ref="editorScrollRef"
+                class="thin-scroll min-h-0 flex-1 overflow-y-auto bg-[#0B0B0C] px-4 py-5"
+                @scroll.passive="onEditorScroll"
+              >
                 <PdfPages v-if="doc.kind === 'pdf'" :key="doc.id" :doc="doc" />
                 <div class="mx-auto max-w-[860px]">
                   <div class="rounded-[20px] bg-white shadow-[0_24px_60px_-30px_rgba(0,0,0,0.9)]">
@@ -473,7 +615,13 @@ const isBinaryText = computed(() => doc.value?.kind === 'pptx' || doc.value?.kin
                       class="flex items-center justify-between gap-3 border-b border-[#EDEDF0] px-8 py-3 text-[11px] text-[#98989D]"
                     >
                       <span class="truncate">{{ doc.name }}</span>
-                      <span class="tabular-nums">{{ stats.words }} 词 · {{ stats.chars }} 字</span>
+                      <span class="tabular-nums">
+                        {{ stats.words }} 词 · {{ stats.chars }} 字
+                        <template v-if="totalBlocks > renderedBlocks">
+                          · 第 {{ (windowStart + 1).toLocaleString('en-US') }}–{{ windowEnd.toLocaleString('en-US') }} 块 / 共
+                          {{ totalBlocks.toLocaleString('en-US') }} 块（滚动继续加载）
+                        </template>
+                      </span>
                     </div>
                     <div
                       ref="editorRef"

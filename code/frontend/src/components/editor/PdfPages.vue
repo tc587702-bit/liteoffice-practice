@@ -13,7 +13,7 @@ const states = ref<Record<number, 'idle' | 'rendering' | 'done' | 'error'>>({})
 const errors = ref<Record<number, string>>({})
 const rootRef = ref<HTMLElement | null>(null)
 
-const PRELOAD_MARGIN = 480
+const PRELOAD_PAGES = 2
 
 let pdfDoc: PDFDocumentProxy | null = null
 let owned = false
@@ -74,22 +74,28 @@ function enqueue(index: number) {
   void drainQueue()
 }
 
-/** 按滚动位置判断哪些页进入预加载区（只渲染可见页 + 一屏预读） */
+/** 只渲染可视页 ±2 页；其余保持占位，翻页/滚动时再渲染 */
 function scan() {
   frame = 0
-  const root = rootRef.value
-  if (!root) return
+  if (!rootRef.value) return
   const viewportTop = 0
   const viewportBottom = window.innerHeight
+  let firstVisible = -1
+  let lastVisible = -1
   for (const page of pages.value) {
-    if (states.value[page.index] === 'done' || states.value[page.index] === 'rendering') continue
     const host = pageHost(page.index)
     if (!host) continue
     const rect = host.getBoundingClientRect()
-    if (rect.bottom > viewportTop - PRELOAD_MARGIN && rect.top < viewportBottom + PRELOAD_MARGIN) {
-      enqueue(page.index)
+    if (rect.bottom > viewportTop && rect.top < viewportBottom) {
+      if (firstVisible < 0) firstVisible = page.index
+      lastVisible = page.index
     }
+    if (firstVisible >= 0 && rect.top > viewportBottom) break
   }
+  if (firstVisible < 0) return
+  const from = Math.max(1, firstVisible - PRELOAD_PAGES)
+  const to = Math.min(pages.value.length, lastVisible + PRELOAD_PAGES)
+  for (let index = from; index <= to; index++) enqueue(index)
 }
 
 function schedule() {
@@ -141,7 +147,7 @@ onBeforeUnmount(() => {
 <template>
   <section v-if="pages.length" ref="rootRef" class="mx-auto mb-5 w-full max-w-[860px]">
     <div class="mb-2 flex items-center justify-between gap-3 text-[11.5px] text-[#636366]">
-      <span>PDF 页面 · 按需渲染（只渲染可见页）</span>
+      <span>PDF 页面 · 只渲染可视页 ±2 页（其余为占位）</span>
       <span class="tabular-nums">共 {{ pages.length }} 页</span>
     </div>
     <div class="flex flex-col gap-4">
