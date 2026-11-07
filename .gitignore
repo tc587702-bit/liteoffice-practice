@@ -165,3 +165,6 @@ __pycache__/
 *.pyc
 .env
 .env.local
+
+# ---- Agent 运行时知识库 ----
+code/agent/data/

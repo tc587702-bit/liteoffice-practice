@@ -25,6 +25,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from .llm import complete, info as llm_info
+from . import kb as KB
 from .graph import run_agent
 from .tools import run_tool, tool_manifest
 
@@ -127,3 +128,109 @@ def chat(payload: ChatPayload, x_api_token: str | None = Header(default=None)) -
 @app.get("/v1/llm/info")
 def llm_information() -> dict[str, Any]:
     return llm_info()
+
+# ---------------- 知识库（共享） ----------------
+
+ADMIN_TOKEN = os.getenv("LITEOFFICE_ADMIN_TOKEN", "")
+DEFAULT_KB = os.getenv("LITEOFFICE_KB_ID", "kb_shared")
+
+
+def _require_admin(token: str | None) -> None:
+    """写操作保护：设置了 LITEOFFICE_ADMIN_TOKEN 就必须带对；未设置则放开（仅课程演示）。"""
+    if ADMIN_TOKEN and token != ADMIN_TOKEN:
+        raise HTTPException(status_code=401, detail="需要管理口令（X-Admin-Token）")
+
+
+class KbDocPayload(BaseModel):
+    name: str = Field(..., description="文件名")
+    content: str = Field(..., description="文档内容（HTML 或纯文本）")
+
+
+class KbTermPayload(BaseModel):
+    terms: list[dict]
+
+
+class KbQueryPayload(BaseModel):
+    query: str
+    topK: int = 5
+
+
+class KbEvidencePayload(BaseModel):
+    selection: str
+    topK: int = 3
+
+
+@app.get("/v1/kb/{kb_id}/stats")
+def kb_stats(kb_id: str) -> dict[str, Any]:
+    return {
+        "kbId": kb_id,
+        "visibility": "public",
+        "adminOpen": ADMIN_TOKEN == "",
+        "stats": KB.kb_stats(kb_id),
+    }
+
+
+@app.get("/v1/kb/{kb_id}/documents")
+def kb_documents(kb_id: str) -> dict[str, Any]:
+    return {"documents": KB.list_documents(kb_id)}
+
+
+@app.post("/v1/kb/{kb_id}/documents", status_code=201)
+def kb_add_document(
+    kb_id: str,
+    payload: KbDocPayload,
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, Any]:
+    _require_admin(x_admin_token)
+    r = KB.add_document(kb_id, payload.name, payload.content)
+    return {**r, "stats": KB.kb_stats(kb_id)}
+
+
+@app.delete("/v1/kb/{kb_id}/documents/{doc_id}")
+def kb_delete_document(
+    kb_id: str,
+    doc_id: str,
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, Any]:
+    _require_admin(x_admin_token)
+    ok = KB.delete_document(doc_id)
+    return {"ok": ok, "stats": KB.kb_stats(kb_id)}
+
+
+@app.post("/v1/kb/{kb_id}/terms")
+def kb_add_terms(
+    kb_id: str,
+    payload: KbTermPayload,
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, Any]:
+    _require_admin(x_admin_token)
+    n = KB.add_terms(kb_id, payload.terms)
+    return {"added": n, "stats": KB.kb_stats(kb_id)}
+
+
+@app.post("/v1/kb/{kb_id}/search")
+def kb_search(kb_id: str, payload: KbQueryPayload) -> dict[str, Any]:
+    """出口 A：问答用 —— 返回相关段落 + 出处。"""
+    hits = KB.search(kb_id, payload.query, top_k=payload.topK)
+    return {"query": payload.query, "hits": hits, "count": len(hits)}
+
+
+@app.post("/v1/kb/{kb_id}/evidence")
+def kb_evidence(kb_id: str, payload: KbEvidencePayload) -> dict[str, Any]:
+    """出口 B：改写用 —— 返回术语 + 规范片段，供拼 prompt。"""
+    return KB.build_evidence(kb_id, payload.selection, top_k=payload.topK)
+
+
+@app.get("/v1/kb")
+def kb_list() -> dict[str, Any]:
+    """当前部署的知识库列表（共享库只有一个也返回数组，便于扩展）。"""
+    return {
+        "kbs": [
+            {
+                "id": DEFAULT_KB,
+                "name": "共享知识库",
+                "visibility": "public",
+                "stats": KB.kb_stats(DEFAULT_KB),
+            }
+        ]
+    }
