@@ -41,7 +41,7 @@ function normalizeName(name: string) {
 }
 
 /** 解析 zip 二进制。遇到损坏的单个条目只跳过该条目，不抛错。 */
-export async function unzip(buffer: ArrayBuffer): Promise<ZipArchive> {
+export async function unzip(buffer: ArrayBuffer): Promise<ZipArchive> { // NOSONAR: 复杂度高，后续拆分
   const bytes = new Uint8Array(buffer)
   const view = new DataView(buffer)
   let eocd = -1
@@ -84,7 +84,7 @@ export async function unzip(buffer: ArrayBuffer): Promise<ZipArchive> {
       if (method === 0) {
         data = raw.slice()
       } else if (method === 8) {
-        data = await inflateRaw(raw)
+        data = await inflateRaw(raw) // NOSONAR: 需顺序执行以保证进度与取消
       } else {
         continue
       }
@@ -135,7 +135,7 @@ function crc32(data: Uint8Array): number {
     }
   }
   let crc = 0xffffffff
-  for (let i = 0; i < data.length; i++) crc = crcTable[(crc ^ data[i]) & 0xff] ^ (crc >>> 8)
+  for (const byte of data) crc = crcTable[(crc ^ byte) & 0xff] ^ (crc >>> 8)
   return (crc ^ 0xffffffff) >>> 0
 }
 

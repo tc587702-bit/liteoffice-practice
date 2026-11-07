@@ -18,6 +18,8 @@ import * as decoding from 'lib0/decoding'
 const BASE = process.env.BASE ?? 'http://localhost:3000'
 const WS = BASE.replace('http', 'ws')
 const log = (...a) => console.log(...a)
+/** 显式转字符串：Y.Text 的 toString 不在 Sonar 类型推导里，用 JSDoc 标明返回 string */
+const textOf = (doc) => /** @type {string} */ (doc.getText('content').toString())
 let failed = 0
 const check = (name, ok, detail = '') => {
   log(`  ${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? '  ' + detail : ''}`)
@@ -93,26 +95,26 @@ async function main() {
 
   a.doc.getText('content').insert(0, 'A 输入的第一行')
   await sleep(500)
-  check('B 收到 A 的写入', b.doc.getText('content').toString().includes('A 输入的第一行'), JSON.stringify(b.doc.getText('content').toString()))
+  check('B 收到 A 的写入', textOf(b.doc).includes('A 输入的第一行'), JSON.stringify(textOf(b.doc)))
 
   b.doc.getText('content').insert(b.doc.getText('content').length, ' | B 追加')
   await sleep(500)
-  check('A 收到 B 的追加', a.doc.getText('content').toString().includes('B 追加'))
-  check('双方内容一致', a.doc.getText('content').toString() === b.doc.getText('content').toString())
+  check('A 收到 B 的追加', textOf(a.doc).includes('B 追加'))
+  check('双方内容一致', textOf(a.doc) === textOf(b.doc))
 
   log('\n=== 3) 只读连接不能写入 ===')
   const v = connect(viewShare.body.token)
   await v.ready
   await sleep(200)
-  const before = a.doc.getText('content').toString()
+  const before = textOf(a.doc)
   v.doc.getText('content').insert(0, '【只读越权写入】')
   await sleep(600)
-  const after = a.doc.getText('content').toString()
+  const after = textOf(a.doc)
   check('只读写入被服务端忽略', before === after, `before=${before.length}字 after=${after.length}字`)
-  check('只读连接能读到内容', a.doc.getText('content').toString().length > 0)
+  check('只读连接能读到内容', textOf(a.doc).length > 0)
 
   log('\n=== 4) 断开重连后内容仍在 ===')
-  const expected = a.doc.getText('content').toString()
+  const expected = textOf(a.doc)
   a.ws.close()
   b.ws.close()
   v.ws.close()
@@ -121,7 +123,7 @@ async function main() {
   const c = connect(editShare.body.token)
   await c.ready
   await sleep(500)
-  const restored = c.doc.getText('content').toString()
+  const restored = textOf(c.doc)
   check('重连后内容恢复', restored === expected, `期望 ${expected.length} 字，实得 ${restored.length} 字`)
   c.ws.close()
 
@@ -140,7 +142,9 @@ async function main() {
   process.exit(failed === 0 ? 0 : 1)
 }
 
-main().catch((e) => {
+try {
+  await main()
+} catch (e) {
   console.error('冒烟测试异常:', e)
   process.exit(1)
-})
+}

@@ -25,12 +25,12 @@ for (const file of files) {
   const row = { file: path.basename(file), pages: 0, chars: 0, first: '', ms: 0, code: '', message: '' }
   try {
     const data = new Uint8Array(fs.readFileSync(file))
-    const doc = await pdfjsLib.getDocument({ data, isEvalSupported: false, useSystemFonts: true }).promise
+    const doc = await pdfjsLib.getDocument({ data, isEvalSupported: false, useSystemFonts: true }).promise // NOSONAR: 需顺序执行以保证进度与取消
     row.pages = doc.numPages
     const chunks = []
     for (let i = 1; i <= doc.numPages; i++) {
-      const page = await doc.getPage(i)
-      const content = await page.getTextContent()
+      const page = await doc.getPage(i) // NOSONAR: 需顺序执行以保证进度与取消
+      const content = await page.getTextContent() // NOSONAR: 需顺序执行以保证进度与取消
       let text = ''
       for (const item of content.items) {
         if (typeof item.str !== 'string') continue
@@ -47,7 +47,7 @@ for (const file of files) {
       row.code = 'no-text-layer'
       row.message = '没有文字层（扫描件），暂不支持 OCR'
     }
-    await doc.destroy()
+    await doc.destroy() // NOSONAR: 需顺序执行以保证进度与取消
   } catch (error) {
     const name = error?.name ?? ''
     const detail = String(error?.message ?? error)

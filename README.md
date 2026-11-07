@@ -119,6 +119,8 @@ npm run smoke        # 另开终端，端到端自检（需服务已启动）
 
 - 数据库自动创建在 `code/backend/data/liteoffice.db`，可用 `LITEOFFICE_DB` 覆盖。
 - 若已执行前端 `npm run build`，后端会同时托管 `code/frontend/dist`，只开 3000 端口即可。
+- 日志默认输出 JSON Lines：`LITEOFFICE_LOG_LEVEL=debug` 调级别，`LITEOFFICE_LOG_FORMAT=text` 换人话。
+- 每个请求都有 `requestId`，响应头 `X-Request-Id` 与日志同值，便于串联排查。
 
 ### 3. Agent 服务（可选）
 
@@ -134,6 +136,8 @@ python -m app.test_kb     # 另开终端，知识库自检
 - 未配置 `DEEPSEEK_API_KEY` 等凭据时自动进入 mock 模式，流程不阻塞。
 - 环境变量需由 shell 导出；项目没有内置 `.env` 自动加载。
 - 后端已把 `/agent/*` 代理到 8100，也可直接访问 `http://localhost:8100/docs`。
+- 日志同样是 JSON Lines（`LITEOFFICE_LOG_LEVEL` / `LITEOFFICE_LOG_FORMAT`），
+  错误统一带 `code` 与 `requestId`，消费方据此分支处理。
 
 ---
 
@@ -192,6 +196,9 @@ python -m app.test_kb     # 另开终端，知识库自检
 3. **依赖收敛**：能自己写的解析器不引第三方；不为了一个图标或动画引入整库。
 4. **原型冻结**：`docs/software/prototype/` 是设计基准，代码向它对齐，不反向修改。
 5. **可访问性兜底**：错误边界、进度反馈、`prefers-reduced-motion`、ARIA 标记。
+6. **可观测**：三个服务共用一套错误模型与日志字段，`requestId` 可跨服务串联；
+   所有 `catch` 要么降级并留痕，要么明确说明为什么忽略（见
+   [日志与错误处理规范](docs/software/observability.md)）。
 
 ---
 
@@ -220,6 +227,7 @@ python -m app.test_kb     # 另开终端，知识库自检
 | [代码职责地图](docs/software/code-map.md) | 最复杂的五处代码与三条数据流 |
 | [Agent 架构](docs/software/agent-architecture.md) | 分层、工具清单、隐私与落地分级 |
 | [RAG 设计](docs/software/rag-design.md) | 切块、混合检索、引用定位 |
+| [日志与错误处理规范](docs/software/observability.md) | 三端日志字段、错误模型、全局兜底、排障流程 |
 | [代码审查报告](docs/software/review-report.md) | 自动审查结果与规模统计 |
 | [文档索引](docs/README.md) | 全部文档导航与阅读顺序 |
 | [问题定义](docs/requirements/problem_definition.md) | 5W1H：为什么做、给谁用 |

@@ -14,8 +14,13 @@
 from __future__ import annotations
 
 import os
+import time
 from dataclasses import dataclass
 from typing import Any
+
+from .logging_conf import get_logger
+
+log = get_logger("llm")
 
 DEFAULT_MODEL = os.getenv("LITEOFFICE_MODEL", "deepseek/deepseek-chat")
 
@@ -70,9 +75,19 @@ def complete(
 
     if not has_credentials(model):
         if allow_mock:
+            # 每次 mock 都要留痕：否则线上「模型没配好」会被当成正常回答很久
+            log.warning(
+                "未配置模型凭据，返回离线模拟结果",
+                model=model,
+                provider=provider_of(model),
+                keyEnv=KEY_ENV.get(provider_of(model)),
+            )
             return LlmResult(True, _mock_reply(prompt), model, mock=True)
-        return LlmResult(False, "", model, mock=False, error=f"缺少 {KEY_ENV.get(provider_of(model), 'API Key')}")
+        missing = KEY_ENV.get(provider_of(model), "API Key")
+        log.error("缺少模型凭据且不允许 mock", model=model, keyEnv=missing)
+        return LlmResult(False, "", model, mock=False, error=f"缺少 {missing}")
 
+    started = time.perf_counter()
     try:
         import litellm  # 延迟导入：避免没用到时拖慢启动
 
@@ -86,10 +101,26 @@ def complete(
             timeout=45,
         )
         text = (resp.choices[0].message.content or "").strip()
+        log.info(
+            "模型调用成功",
+            model=model,
+            durationMs=round((time.perf_counter() - started) * 1000, 1),
+            promptChars=len(prompt),
+            replyChars=len(text),
+        )
         return LlmResult(True, text, model)
     except Exception as exc:
         # 走到这里说明「有凭据但调用失败」（限流 / 欠费 / 网络 / 模型名错）。
         # 绝不能返回 mock 成功，否则前端会把占位文本当成真实回答。
+        # 记录完整 traceback，便于区分是超时、鉴权还是额度问题。
+        log.exception(
+            "模型调用失败",
+            model=model,
+            provider=provider_of(model),
+            durationMs=round((time.perf_counter() - started) * 1000, 1),
+            errorType=type(exc).__name__,
+            error=str(exc)[:300],
+        )
         return LlmResult(False, "", model, mock=False, error=str(exc)[:200])
 
 

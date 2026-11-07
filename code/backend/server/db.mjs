@@ -12,15 +12,25 @@ import { randomBytes, randomUUID } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createLogger } from './logger.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const DB_PATH = process.env.LITEOFFICE_DB ?? resolve(__dirname, '..', 'data', 'liteoffice.db')
 
-mkdirSync(dirname(DB_PATH), { recursive: true })
+const log = createLogger('db')
+
+try {
+  mkdirSync(dirname(DB_PATH), { recursive: true })
+} catch (err) {
+  // 数据目录建不出来 = 后续所有持久化都会失败，属于启动期致命错误
+  log.error('无法创建数据目录', { dir: dirname(DB_PATH), err })
+  throw err
+}
 
 export const db = new DatabaseSync(DB_PATH)
 
-db.exec(`
+try {
+  db.exec(`
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
 
@@ -59,6 +69,23 @@ CREATE TABLE IF NOT EXISTS snapshots (
   PRIMARY KEY (doc_id, at_seq)
 );
 `)
+} catch (err) {
+  // 建表失败（磁盘满 / 文件损坏 / 版本不兼容）：打印可定位信息后退出，不要带着坏库继续跑
+  log.error('初始化数据库表结构失败', { db: DB_PATH, err })
+  throw err
+}
+
+log.debug('数据库就绪', { db: DB_PATH })
+
+/** 优雅关闭时释放文件句柄（WAL 需要正常 close 才能合并） */
+export function closeDb() {
+  try {
+    db.close()
+    log.info('数据库已关闭', { db: DB_PATH })
+  } catch (err) {
+    log.warn('关闭数据库时出错', { err })
+  }
+}
 
 const now = () => Date.now()
 

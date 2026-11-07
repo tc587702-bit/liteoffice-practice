@@ -10,6 +10,10 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from .logging_conf import get_logger
+
+log = get_logger("tools")
+
 TAG_RE = re.compile(r"<[^>]+>")
 BLOCK_RE = re.compile(r"<(h[1-6]|p|li|table)\b[^>]*>([\s\S]*?)</\1>", re.I)
 ROW_RE = re.compile(r"<tr\b[^>]*>([\s\S]*?)</tr>", re.I)
@@ -326,9 +330,13 @@ def tool_manifest() -> list[dict[str, Any]]:
 def run_tool(name: str, html: str, params: dict[str, Any] | None = None) -> ToolResult:
     meta = TOOLS.get(name)
     if not meta:
+        # 模型可能猜错工具名：warn 级别记录，便于发现 prompt 需要调整
+        log.warning("调用未知工具", tool=name, available=list(TOOLS))
         return ToolResult(False, name, f"未知工具：{name}", {})
     fn: Callable[..., ToolResult] = meta["fn"]
     try:
         return fn(html, **(params or {}))
     except Exception as exc:  # 工具异常不冒泡到接口层
+        # 单个工具失败不应让整个 Agent 流程崩掉，但必须留下完整堆栈
+        log.exception("工具执行异常", tool=name, htmlChars=len(html), errorType=type(exc).__name__)
         return ToolResult(False, name, f"工具执行失败：{exc}", {})

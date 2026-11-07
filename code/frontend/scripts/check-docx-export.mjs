@@ -89,16 +89,31 @@ function findBrowser() {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
+/* ---------------- 运行地址（端口不写死，可用环境变量覆盖） ---------------- */
+/** 测试服务绑定的主机地址，默认仅本机 */
+const HOST = process.env.LITEOFFICE_TEST_HOST ?? '127.0.0.1'
+/** CDP 调试端口：0 表示由浏览器自动分配（从 DevToolsActivePort 读取真实端口） */
+const CDP_PORT = Number(process.env.CDP_PORT ?? 0) || 0
+
+/** 从 vite 实际监听地址取端口，避免 port: 0 时拼出 :0 */
+function resolveServerPort(server) {
+  const address = server.httpServer?.address?.()
+  if (address && typeof address === 'object' && address.port) return address.port
+  const configured = Number(server.config?.server?.port)
+  return Number.isFinite(configured) && configured > 0 ? configured : null
+}
+
 async function launchDevServer() {
   const { createServer } = await import('vite')
   const server = await createServer({
-    server: { port: 0, strictPort: false, host: '127.0.0.1' },
+    server: { port: 0, strictPort: false, host: HOST },
     logLevel: 'silent',
     optimizeDeps: { noDiscovery: true },
   })
   await server.listen()
   const urls = server.resolvedUrls?.local ?? []
-  return { server, url: urls[0] ?? `http://127.0.0.1:${server.config.server.port}/` }
+  const port = resolveServerPort(server)
+  return { server, url: urls[0] ?? `http://${HOST}:${port ?? '<port>'}/` }
 }
 
 async function launchBrowser(profile) {
@@ -106,7 +121,7 @@ async function launchBrowser(profile) {
   if (!executable) throw new Error('未找到 Chrome / Edge，可设置 CHROME_PATH 指向可执行文件')
   fs.rmSync(profile, { recursive: true, force: true, maxRetries: 3, retryDelay: 150 })
   fs.mkdirSync(profile, { recursive: true })
-  const port = 9333
+  const port = CDP_PORT
   const child = spawn(
     executable,
     [
@@ -122,12 +137,26 @@ async function launchBrowser(profile) {
     { stdio: 'ignore', detached: true },
   )
   child.unref()
-  const waitForCdp = async (attempts) => {
+  // port 为 0 时浏览器会自动选端口，并把真实端口写进 profile/DevToolsActivePort
+  const readCdpPort = () => {
+    if (port > 0) return port
     try {
-      const res = await fetch(`http://127.0.0.1:${port}/json/version`)
-      if (res.ok) return { port, browser: (await res.json()).Browser, child }
+      const [firstLine] = fs.readFileSync(path.join(profile, 'DevToolsActivePort'), 'utf8').split('\n')
+      const actual = Number(firstLine)
+      return Number.isFinite(actual) && actual > 0 ? actual : 0
     } catch {
-      /* 继续等待 */
+      return 0
+    }
+  }
+  const waitForCdp = async (attempts) => {
+    const actualPort = readCdpPort()
+    if (actualPort) {
+      try {
+        const res = await fetch(`http://${HOST}:${actualPort}/json/version`)
+        if (res.ok) return { port: actualPort, browser: (await res.json()).Browser, child }
+      } catch {
+        /* 继续等待 */
+      }
     }
     if (attempts <= 0) throw new Error('浏览器 CDP 未就绪')
     await sleep(200)
@@ -138,7 +167,7 @@ async function launchBrowser(profile) {
 
 async function runInBrowser(port, url, base64Docx) {
   const target = await (
-    await fetch(`http://127.0.0.1:${port}/json/new?${encodeURIComponent(url)}`, { method: 'PUT' })
+    await fetch(`http://${HOST}:${port}/json/new?${encodeURIComponent(url)}`, { method: 'PUT' })
   ).json()
   const ws = new WebSocket(target.webSocketDebuggerUrl)
   await new Promise((resolve, reject) => {

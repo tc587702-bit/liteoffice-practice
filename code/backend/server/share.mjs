@@ -8,7 +8,10 @@
  *  4. 撤销不改 token，只置 revoked（旧链接立刻失效，便于排查）
  */
 import { createShare, resolveShare, revokeShare, listShares } from './db.mjs'
+import { BadRequestError } from './errors.mjs'
+import { createLogger } from './logger.mjs'
 
+const log = createLogger('share')
 const FAIL_LIMIT = 20
 const FAIL_WINDOW_MS = 60_000
 const failures = new Map() // ip -> { count, resetAt }
@@ -21,6 +24,10 @@ export function noteFailure(ip) {
     return
   }
   rec.count += 1
+  if (rec.count === FAIL_LIMIT) {
+    // 只在刚触发阈值时记一次，避免刷爆日志
+    log.warn('IP 触发分享链接失败阈值', { ip, count: rec.count, windowMs: FAIL_WINDOW_MS })
+  }
 }
 
 export function isBlocked(ip) {
@@ -34,8 +41,10 @@ export function isBlocked(ip) {
 }
 
 export function makeShare({ docId, role, expiresInHours = 0 }) {
-  if (role !== 'view' && role !== 'edit') throw new Error('role 只能是 view 或 edit')
-  const expiresAt = expiresInHours > 0 ? Date.now() + expiresInHours * 3600_000 : null
+  if (role !== 'view' && role !== 'edit') {
+    throw new BadRequestError('role 只能是 view 或 edit', { code: 'INVALID_ROLE', details: { role } })
+  }
+  const expiresAt = expiresInHours > 0 ? Date.now() + expiresInHours * 3_600_000 : null
   const token = createShare({ docId, role, expiresAt })
   return { token, role, expiresAt, url: `/d/${token}` }
 }

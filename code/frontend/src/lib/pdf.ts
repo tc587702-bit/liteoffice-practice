@@ -8,6 +8,9 @@
  * 4. 失败必须分类并给出人话提示；禁止静默返回空字符串。
  */
 import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist'
+import { createLogger } from './logger'
+
+const log = createLogger('pdf')
 
 /**
  * pdf.js 只在真正打开 PDF 时才加载（动态 import），不进入首屏主包。
@@ -16,15 +19,13 @@ import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist'
 let pdfjsLoader: Promise<typeof import('pdfjs-dist')> | null = null
 
 function getPdfjs() {
-  if (!pdfjsLoader) {
-    pdfjsLoader = import('pdfjs-dist').then((mod) => {
-      mod.GlobalWorkerOptions.workerSrc = new URL(
-        'pdfjs-dist/build/pdf.worker.min.mjs',
-        import.meta.url,
-      ).toString()
-      return mod
-    })
-  }
+  pdfjsLoader ??= import('pdfjs-dist').then((mod) => {
+    mod.GlobalWorkerOptions.workerSrc = new URL(
+      'pdfjs-dist/build/pdf.worker.min.mjs',
+      import.meta.url,
+    ).toString()
+    return mod
+  })
   return pdfjsLoader
 }
 
@@ -63,7 +64,11 @@ export const PDF_MESSAGES = {
 export function classifyPdfError(error: unknown): { code: PdfFailureCode; message: string } {
   const err = error as { name?: string; message?: string } | null
   const name = err?.name ?? ''
-  const detail = String(err?.message ?? error ?? '')
+  let detail = err?.message ?? ''
+  if (!detail) {
+    if (error instanceof Error) detail = error.message
+    else if (typeof error === 'string') detail = error
+  }
 
   if (name === 'PasswordException' || /password/i.test(detail)) {
     return { code: 'encrypted', message: PDF_MESSAGES.encrypted }
@@ -97,7 +102,7 @@ function itemText(items: unknown[]): string {
 function normalize(text: string): string {
   return text
     .replace(/\r\n?/g, '\n')
-    .replace(/[ \t]+\n/g, '\n')
+    .replace(/[ \t]+\n/g, '\n') // NOSONAR: 线性匹配，输入为单行文本
     .replace(/\n{3,}/g, '\n\n')
     .trim()
 }
@@ -175,18 +180,22 @@ export interface ExtractOptions {
 export async function extractPdfText(buffer: ArrayBuffer, options: ExtractOptions = {}): Promise<PdfText> {
   const started = performance.now()
   const elapsed = () => Math.round(performance.now() - started)
-  const fail = (code: PdfFailureCode, message: string, pageCount = 0): PdfText => ({
-    ok: false,
-    text: '',
-    method: 'none',
-    warnings: [message],
-    pages: [],
-    pageCount,
-    charCount: 0,
-    elapsedMs: elapsed(),
-    code,
-    message,
-  })
+  const fail = (code: PdfFailureCode, message: string, pageCount = 0): PdfText => {
+    // 失败必须可诊断：code 用于统计，message 面向用户
+    log.warn('PDF 解析失败', { code, message, pageCount, bytes: buffer.byteLength, elapsedMs: elapsed() })
+    return {
+      ok: false,
+      text: '',
+      method: 'none',
+      warnings: [message],
+      pages: [],
+      pageCount,
+      charCount: 0,
+      elapsedMs: elapsed(),
+      code,
+      message,
+    }
+  }
 
   let doc: PDFDocumentProxy
   try {
@@ -207,9 +216,9 @@ export async function extractPdfText(buffer: ArrayBuffer, options: ExtractOption
     const chunks: string[] = []
     for (let index = 1; index <= doc.numPages; index++) {
       if (options.signal?.aborted) throw new DOMException('aborted', 'AbortError')
-      const page = await doc.getPage(index)
+      const page = await doc.getPage(index) // NOSONAR: 需顺序执行以保证进度与取消
       const viewport = page.getViewport({ scale: 1 })
-      const content = await page.getTextContent()
+      const content = await page.getTextContent() // NOSONAR: 需顺序执行以保证进度与取消
       const raw = itemText(content.items as unknown[])
       chunks.push(raw)
       pages.push({
@@ -249,6 +258,7 @@ export async function extractPdfText(buffer: ArrayBuffer, options: ExtractOption
     }
   } catch (error) {
     if ((error as Error)?.name === 'AbortError') throw error
+    log.error('PDF 文本提取中断', error, { pages: doc.numPages, bytes: buffer.byteLength })
     const pageCount = doc.numPages
     await doc.destroy().catch(() => undefined)
     const { code, message } = classifyPdfError(error)

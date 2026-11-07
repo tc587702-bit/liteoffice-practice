@@ -13,12 +13,17 @@ Agent 编排层：LangGraph 状态图（对应图上的「Agent 层：Prompt、�
 from __future__ import annotations
 
 import re
+import time
 from typing import Any, TypedDict
 
 from langgraph.graph import StateGraph, START, END
 
 from .llm import complete
 from .tools import run_tool, tool_manifest
+from .errors import AppError
+from .logging_conf import get_logger
+
+log = get_logger("graph")
 
 MAX_STEPS = 4
 
@@ -69,6 +74,7 @@ def node_plan(state: AgentState) -> AgentState:
         params["query"] = m.group(1) if m else ""
 
     if tool:
+        log.debug("规则命中工具", tool=tool, queryChars=len(query))
         return {
             **state,
             "tool": tool,
@@ -78,6 +84,7 @@ def node_plan(state: AgentState) -> AgentState:
 
     # 没有命中规则：让模型决定（无 Key 时 mock 返回，仍能给出可读回复）
     manifest = ", ".join(t["name"] for t in tool_manifest())
+    log.debug("规则未命中，改为模型决策", queryChars=len(query))
     res = complete(
         [
             {"role": "system", "content": f"你是文档助手。可用工具：{manifest}。只输出工具名，不要解释。"},
@@ -86,6 +93,9 @@ def node_plan(state: AgentState) -> AgentState:
         model=state.get("model"),
         max_tokens=20,
     )
+    if not res.ok:
+        # 模型选择失败不算致命：下面 call_tool 会跳过，respond 用文档内容兜底
+        log.warning("模型选择工具失败，将直接基于文档回答", model=res.model, error=res.error)
     guess = (res.text or "").strip().split()[0] if res.text else ""
     guessed = guess if guess in {t["name"] for t in tool_manifest()} else ""
     return {
@@ -101,7 +111,15 @@ def node_call_tool(state: AgentState) -> AgentState:
     tool = state.get("tool") or ""
     if not tool:
         return {**state, "steps": _step(state, "call_tool", "跳过：没有需要调用的工具")}
+    started = time.perf_counter()
     result = run_tool(tool, state.get("html", ""), state.get("params") or {})
+    log.debug(
+        "工具执行完成",
+        tool=tool,
+        ok=result.ok,
+        durationMs=round((time.perf_counter() - started) * 1000, 1),
+        summaryChars=len(result.summary or ""),
+    )
     return {
         **state,
         "tool_summary": result.summary,
@@ -132,6 +150,15 @@ def node_respond(state: AgentState) -> AgentState:
         ],
         model=state.get("model"),
     )
+    if not res.ok:
+        # 模型失败但流程不能崩：给出可读兜底，同时把原因记进日志
+        log.error("回答生成失败，返回兜底文案", model=res.model, error=res.error)
+        return {
+            **state,
+            "answer": "抱歉，当前无法生成回答（模型服务不可用）。可以稍后重试，或直接使用文档工具查看统计结果。",
+            "mock": False,
+            "steps": _step(state, "respond", "模型调用失败，已降级"),
+        }
     return {
         **state,
         "answer": res.text or "（没有生成内容）",
@@ -157,7 +184,32 @@ GRAPH = build_graph()
 
 def run_agent(html: str, query: str, model: str | None = None) -> dict[str, Any]:
     init: AgentState = {"html": html, "query": query, "model": model, "steps": []}
-    out: AgentState = GRAPH.invoke(init)
+    started = time.perf_counter()
+    try:
+        out: AgentState = GRAPH.invoke(init)
+    except AppError:
+        raise
+    except Exception as exc:
+        # 编排层异常：记录完整 traceback，对外只回「稍后重试」，不泄漏内部结构
+        log.exception(
+            "Agent 编排失败",
+            errorType=type(exc).__name__,
+            error=str(exc)[:300],
+            durationMs=round((time.perf_counter() - started) * 1000, 1),
+        )
+        raise AppError(
+            "Agent 编排失败，请稍后重试",
+            code="AGENT_FAILED",
+            status_code=500,
+            cause=exc,
+        ) from exc
+
+    log.debug(
+        "Agent 编排结束",
+        tool=out.get("tool") or "-",
+        steps=len(out.get("steps") or []),
+        durationMs=round((time.perf_counter() - started) * 1000, 1),
+    )
     return {
         "ok": True,
         "answer": out.get("answer", ""),

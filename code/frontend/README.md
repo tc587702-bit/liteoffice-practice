@@ -38,6 +38,8 @@ src/
     docx.ts  xlsx.ts  pdf.ts  zip.ts  xml.ts  db.ts  file.ts  markdown.ts
     exporter.ts        # 下载与导出自检（blob URL）
     sheetjs-loader.ts  # 从 npm 包 xlsx 适配，不再走 public/vendor 或 http
+    logger.ts          # 分级日志 + 最近 300 条环形缓冲 + 可选远程上报
+    errors.ts          # AppError、全局兜底（Vue / window / promise / router）、诊断信息
   types/sheetjs.d.ts   # 内部最小类型声明
   index.css            # Tailwind + 冻结深色令牌 + 组件类 + 动效
 ```
@@ -66,6 +68,20 @@ src/
 `docx` 未使用：DOCX 回写由内置 `lib/zip.ts` + `lib/docx.ts` 直接生成 OOXML。
 
 构建期：`vite`、`@vitejs/plugin-vue`、`typescript`、`vue-tsc`、`tailwindcss`、`postcss`、`autoprefixer`。
+
+## 日志与错误处理
+
+- **日志**：`createLogger('scope')` 输出 `debug/info/warn/error`；开发环境全量进控制台，
+  生产环境只输出 `error`，但**始终**保留最近 300 条在内存里。
+- **导出诊断**：`collectDiagnostics()` 把 UA / 视口 / 地址 / 日志打包成 txt；
+  错误边界页上有「下载诊断信息」按钮，开发期也可在控制台执行 `__liteofficeLogs()`。
+- **全局兜底**：`installGlobalErrorHandlers(app, router)`（`main.ts` 中先于 `mount` 调用）
+  接管 Vue 渲染错误、`window.onerror`、`unhandledrejection`、路由错误。
+- **远程上报（可选）**：设置 `VITE_LOG_ENDPOINT` 后，`error` 级日志用 `sendBeacon` 上报，
+  失败静默，不影响业务。
+- **降级优先**：解析/导出失败一律「给出人话 + 提供下载原始文件」，不静默产出错误结果。
+
+详见仓库根目录 [日志与错误处理规范](../../docs/software/observability.md)。
 
 ## 已知边界
 

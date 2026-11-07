@@ -1,5 +1,8 @@
 import { entryBytes, listByPrefix, unzip, type ZipArchive } from './zip'
 import { attr, childElements, descendants, escapeXml, firstChild, firstDescendant, parseXmlFromZip } from './xml'
+import { createLogger } from './logger'
+
+const log = createLogger('docx')
 
 /* ------------------------------------------------------------------ */
 /* 类型                                                                 */
@@ -506,8 +509,12 @@ export async function parseDocx(input: ArrayBuffer, options: ParseOptions = {}):
         // 结构化内容控件：把内部段落扁平处理
         descendants(node, 'p').forEach((p) => handleParagraph(p))
       }
-    } catch {
-      // 单节点失败只跳过
+    } catch (error) {
+      // 单节点（段落/表格）解析失败只跳过该节点，但要留痕，否则会「神秘少一段」
+      log.debug('跳过无法解析的 docx 节点', {
+        node: node.localName,
+        error: error instanceof Error ? error.message : String(error),
+      })
       paragraphCount++
     }
   })
@@ -701,7 +708,12 @@ function decodeDataUrl(src: string): { bytes: Uint8Array; ext: ImageExt } | { re
     for (let i = 0; i < binary.length; i++) bytes[i] = binary.codePointAt(i) ?? 0
     if (!bytes.length) return { reason: '图片二进制为空' }
     return { bytes, ext }
-  } catch {
+  } catch (error) {
+    // 图片内联失败会让导出丢图，属于用户可感知问题：warn + 具体原因
+    log.warn('base64 图片解码失败，导出时将跳过该图', {
+      mime,
+      error: error instanceof Error ? error.message : String(error),
+    })
     return { reason: 'base64 解码失败' }
   }
 }
@@ -758,7 +770,13 @@ function readImageSize(bytes: Uint8Array, ext: ImageExt): ImagePixelSize | null 
     if (ext === 'png') return readPngSize(bytes, view)
     if (ext === 'gif') return readGifSize(bytes, view)
     return readJpegSize(bytes, view)
-  } catch {
+  } catch (error) {
+    // 读不到尺寸就用默认值兜底，不影响图片本身写入
+    log.debug('读取图片尺寸失败，使用默认尺寸', {
+      ext,
+      bytes: bytes.byteLength,
+      error: error instanceof Error ? error.message : String(error),
+    })
     return null
   }
 }

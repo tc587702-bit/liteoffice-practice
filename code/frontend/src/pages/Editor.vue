@@ -13,6 +13,9 @@ import { outlineFromHtml, useWorkspaceStore } from '../stores/workspace'
 import { formatSize, KIND_EXT } from '../lib/file'
 import { downloadOriginal, exportDocument, exportTextCopy } from '../lib/exporter'
 import { escapeHtml, htmlToPlainText } from '../lib/markdown'
+import { createLogger } from '../lib/logger'
+
+const log = createLogger('editor')
 
 /* 大纲层级缩进：全部用静态类名，避免在模板里写内联 style 做布局 */
 const OUTLINE_INDENT = ['pl-[8px]', 'pl-[20px]', 'pl-[32px]', 'pl-[44px]', 'pl-[56px]', 'pl-[68px]']
@@ -213,7 +216,12 @@ function refreshMarks() {
   const block = (format: string) => {
     try {
       return document.queryCommandState(format)
-    } catch {
+    } catch (error) {
+      // 某些浏览器/选区下 queryCommandState 会抛错，工具栏应保持「未激活」而不是崩溃
+      log.debug('查询选区格式状态失败', {
+        format,
+        error: error instanceof Error ? error.message : String(error),
+      })
       return false
     }
   }
@@ -346,7 +354,12 @@ function onCommand(command: string) {
       default:
         return
     }
-  } catch {
+  } catch (error) {
+    // execCommand 在空选区/不可编辑区域会抛错，属于用户可理解的失败，记 warn 便于统计
+    log.warn('富文本命令执行失败', {
+      command,
+      error: error instanceof Error ? error.message : String(error),
+    })
     store.addToast({ title: '该操作在当前选区不可用', tone: 'warning' })
     return
   }
