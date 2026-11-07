@@ -15,6 +15,7 @@
  * vite 起临时 dev server，把模块交给本机 headless Chromium 执行（无新增依赖）。
  */
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 
@@ -79,16 +80,18 @@ async function launchBrowser(profile) {
     { stdio: 'ignore', detached: true },
   )
   child.unref()
-  for (let i = 0; i < 150; i++) {
+  const waitForCdp = async (attempts) => {
     try {
       const res = await fetch(`http://127.0.0.1:${port}/json/version`)
       if (res.ok) return { port, browser: (await res.json()).Browser, child }
     } catch {
       /* wait */
     }
+    if (attempts <= 0) throw new Error('浏览器 CDP 未就绪')
     await sleep(200)
+    return waitForCdp(attempts - 1)
   }
-  throw new Error('浏览器 CDP 未就绪')
+  return waitForCdp(150)
 }
 
 async function openPage(port, url) {
@@ -132,7 +135,7 @@ const started = Date.now()
 let dev
 let browser
 let fixtureServer
-const profile = path.join(process.env.TMPDIR || process.cwd(), 'lo-large-check-profile')
+const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'lo-large-check-'))
 const results = []
 
 /**
@@ -195,11 +198,8 @@ try {
     return out.result.value
   }
 
-  const base = JSON.stringify(dev.url)
-
   /* ---------- 1) md ---------- */
-  results.push(
-    await runItem('md', `(async () => {
+  const mdResult = await runItem('md', `(async () => {
       const t0 = performance.now()
       const res = await fetch('http://127.0.0.1:8103/large-8mb.md')
       const buf = await res.arrayBuffer()
@@ -212,12 +212,11 @@ try {
       const mem = performance.memory ? performance.memory.usedJSHeapSize : 0
       return { item: 'md', bytes: buf.byteLength, blocks, hasMark, ms: Math.round(performance.now() - t0), peakMB: Math.round((mem / 1048576) * 10) / 10,
         pass: blocks >= 120000 && hasMark }
-    })()`),
-  )
+    })()`)
+  results.push(mdResult)
 
   /* ---------- 2) xlsx ---------- */
-  results.push(
-    await runItem('xlsx', `(async () => {
+  const xlsxResult = await runItem('xlsx', `(async () => {
       const t0 = performance.now()
       const buf = await (await fetch('http://127.0.0.1:8103/large-50k.xlsx')).arrayBuffer()
       const mod = await import('/src/lib/xlsx.ts')
@@ -230,12 +229,11 @@ try {
       return { item: 'xlsx', bytes: buf.byteLength, rows: sheet.rows.length, lastCell, warnings: warningText,
         ms: Math.round(performance.now() - t0), peakMB: Math.round((mem / 1048576) * 10) / 10,
         pass: sheet.rows.length === 50000 && lastCell === 'LAST-ROW-MARK-7C1B' && !warningText.includes('截断') }
-    })()`),
-  )
+    })()`)
+  results.push(xlsxResult)
 
   /* ---------- 3) pdf ---------- */
-  results.push(
-    await runItem('pdf', `(async () => {
+  const pdfResult = await runItem('pdf', `(async () => {
       const t0 = performance.now()
       const buf = await (await fetch('http://127.0.0.1:8103/large-500p.pdf')).arrayBuffer()
       const mod = await import('/src/lib/pdf.ts')
@@ -244,12 +242,11 @@ try {
       return { item: 'pdf', bytes: buf.byteLength, pages: res.pageCount, hasMark: (res.text || '').includes('LAST-PAGE-MARK-2D8E'),
         chars: res.charCount, ms: Math.round(performance.now() - t0), peakMB: Math.round((mem / 1048576) * 10) / 10,
         pass: res.pageCount === 500 && (res.text || '').includes('LAST-PAGE-MARK-2D8E') }
-    })()`),
-  )
+    })()`)
+  results.push(pdfResult)
 
   /* ---------- 4) docx ---------- */
-  results.push(
-    await runItem('docx', `(async () => {
+  const docxResult = await runItem('docx', `(async () => {
       const t0 = performance.now()
       const buf = await (await fetch('http://127.0.0.1:8103/large-20mb.docx')).arrayBuffer()
       const mod = await import('/src/lib/docx.ts')
@@ -259,8 +256,8 @@ try {
         hasMark: parsed.html.includes('END-OF-DOCX-MARK-6B2C'), ms: Math.round(performance.now() - t0),
         peakMB: Math.round((mem / 1048576) * 10) / 10,
         pass: parsed.images.length === 50 && parsed.paragraphCount >= 2000 && parsed.html.includes('END-OF-DOCX-MARK-6B2C') }
-    })()`),
-  )
+    })()`)
+  results.push(docxResult)
 
   page.close()
 } catch (error) {
@@ -281,15 +278,15 @@ if (results.length) {
   console.log(`运行环境: ${browser?.browser ?? 'unknown'}（无截断自检）`)
   console.log('')
   const label = { md: 'md   8 MB / 12 万段', xlsx: 'xlsx 5 万行 × 20 列', pdf: 'pdf  500 页', docx: 'docx 20 MB / 50 图' }
+  const detailOf = (row) => {
+    if (row.error) return `ERROR: ${row.error}`
+    if (row.item === 'md') return `blocks=${row.blocks} mark=${row.hasMark}`
+    if (row.item === 'xlsx') return `rows=${row.rows} last="${row.lastCell}"`
+    if (row.item === 'pdf') return `pages=${row.pages} chars=${row.chars} mark=${row.hasMark}`
+    return `images=${row.images} paragraphs=${row.paragraphs} mark=${row.hasMark}`
+  }
   for (const row of results) {
-    const detail = row.error ? `ERROR: ${row.error}` :
-      row.item === 'md'
-        ? `blocks=${row.blocks} mark=${row.hasMark}`
-        : row.item === 'xlsx'
-          ? `rows=${row.rows} last="${row.lastCell}"`
-          : row.item === 'pdf'
-            ? `pages=${row.pages} chars=${row.chars} mark=${row.hasMark}`
-            : `images=${row.images} paragraphs=${row.paragraphs} mark=${row.hasMark}`
+    const detail = detailOf(row)
     console.log(
       `${label[row.item].padEnd(22)} 耗时=${String(row.ms).padStart(6)}ms  峰值堆≈${String(row.peakMB).padStart(7)}MB  ${detail}  ${row.pass ? 'PASS' : 'FAIL'}`,
     )

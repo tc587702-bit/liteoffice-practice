@@ -19,6 +19,7 @@
  */
 import { spawn } from 'node:child_process'
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import zlib from 'node:zlib'
 
@@ -121,16 +122,18 @@ async function launchBrowser(profile) {
     { stdio: 'ignore', detached: true },
   )
   child.unref()
-  for (let i = 0; i < 120; i++) {
+  const waitForCdp = async (attempts) => {
     try {
       const res = await fetch(`http://127.0.0.1:${port}/json/version`)
       if (res.ok) return { port, browser: (await res.json()).Browser, child }
     } catch {
       /* 继续等待 */
     }
+    if (attempts <= 0) throw new Error('浏览器 CDP 未就绪')
     await sleep(200)
+    return waitForCdp(attempts - 1)
   }
-  throw new Error('浏览器 CDP 未就绪')
+  return waitForCdp(120)
 }
 
 async function runInBrowser(port, url, base64Docx) {
@@ -169,11 +172,11 @@ async function runInBrowser(port, url, base64Docx) {
   await send('Runtime.enable')
   await sleep(1200)
 
-  const expression = `(async () => {
+  const expression = String.raw`(async () => {
     const docx = await import('/src/lib/docx.ts')
     const bin = atob(${JSON.stringify(base64Docx)})
     const input = new Uint8Array(bin.length)
-    for (let i = 0; i < bin.length; i++) input[i] = bin.charCodeAt(i)
+    for (let i = 0; i < bin.length; i++) input[i] = bin.codePointAt(i) ?? 0
     const parsed = await docx.parseDocx(input.buffer)
     const report = { imagesEmbedded: 0, imagesSkipped: [], extensions: [] }
     const exported = docx.buildDocx(parsed.html, 'export-check', report)
@@ -181,9 +184,9 @@ async function runInBrowser(port, url, base64Docx) {
     let out = ''
     const chunk = 0x8000
     for (let i = 0; i < exported.length; i += chunk) {
-      out += String.fromCharCode.apply(null, Array.from(exported.subarray(i, i + chunk)))
+      out += String.fromCodePoint.apply(null, Array.from(exported.subarray(i, i + chunk)))
     }
-    const countingHtml = parsed.html.match(/<img\\b/gi)?.length ?? 0
+    const countingHtml = parsed.html.match(/<img\b/gi)?.length ?? 0
     return {
       inputImages: parsed.images.length,
       htmlImages: countingHtml,
@@ -213,7 +216,7 @@ async function runInBrowser(port, url, base64Docx) {
 const startedAt = Date.now()
 let dev
 let browser
-const profile = path.join(process.env.TMPDIR || process.cwd(), 'lo-docx-check-profile')
+const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'lo-docx-check-'))
 try {
   const fileBuffer = fs.readFileSync(input)
   console.log(`输入文件: ${input} (${fileBuffer.length.toLocaleString('en-US')} 字节)`)

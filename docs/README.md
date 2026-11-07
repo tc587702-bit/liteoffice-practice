@@ -2,6 +2,11 @@
 
 | 目录 | 文档 | 内容 | 主要读者 |
 |---|---|---|---|
+| `software/` | [project-structure.md](software/project-structure.md) | **仓库结构总览**：三个服务、目录树、依赖方向、运行配置、改动落点 | 新成员、开发 |
+| `software/` | [code-map.md](software/code-map.md) | 每个文件的职责与五处最复杂代码 | 开发、评审 |
+| `software/` | [agent-architecture.md](software/agent-architecture.md) | Agent 分层、工具清单、隐私与落地分级 | 开发、教师 |
+| `software/` | [rag-design.md](software/rag-design.md) | RAG 切块、检索融合、引用定位 | 开发 |
+| `software/` | [review-report.md](software/review-report.md) | 自动审查结果与规模统计 | 开发 |
 | `requirements/` | [problem_definition.md](requirements/problem_definition.md) | 5W1H 报告、产品描述、竞品差异、成功判定 | 教师、组长 |
 | `requirements/` | [functional_spec.md](requirements/functional_spec.md) | 功能需求（FR-*）、追溯矩阵、端到端验收场景 | 开发、评审 |
 | `requirements/` | [user_stories.md](requirements/user_stories.md) | 用户故事（US-*）、编号化验收条件（AC-*）、INVEST 自检、史诗拆分、到 FR 的追溯 | 教师、组长、开发 |
@@ -15,7 +20,7 @@
 
 ## 阅读顺序建议
 
-**新成员第一天**：problem_definition → functional_spec 第 7 节（验收场景）→ CONTRIBUTING
+**新成员第一天**：project-structure → problem_definition → functional_spec 第 7 节（验收场景）
 
 **答辩前自查**：nonfunctional_spec 第 10 节（指标汇总表）→ risk_mgmt_plan 第 4 节（风险分布）
 
@@ -25,6 +30,6 @@
 
 1. **每条需求可验收**：必须能判断真假，禁止"体验良好"这类表述
 2. **每条需求可追溯**：标注实现位置（文件路径）与验证方式
-3. **未完成项必须显式标注**：用 ⚠️ / ❌ 标出，并在 README「已知问题」同步
+3. **未完成项必须显式标注**：用 ⚠️ / ❌ 标出，并在 README「已知限制」同步
 4. **变更留痕**：每份文档末尾有变更记录表，写清触发原因
-5. **中文文件禁止 shell 文本往返**：见 `CONTRIBUTING.md`，会不可逆损坏编码
+5. **中文文件禁止 shell 文本往返**：请用编辑器或文件工具读写，`cat`/`echo` 往返会不可逆损坏编码
