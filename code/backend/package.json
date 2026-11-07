@@ -1,0 +1,16 @@
+{
+  "name": "liteoffice-backend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "LiteOffice 协作后端：分享链接、多人同时编辑、在线状态",
+  "scripts": {
+    "start": "node server/index.mjs",
+    "smoke": "node server/smoke.mjs"
+  },
+  "dependencies": {
+    "ws": "^8.18.0",
+    "y-protocols": "^1.0.6",
+    "yjs": "^13.6.20"
+  }
+}

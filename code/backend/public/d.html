@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>LiteOffice · 共享文档</title>
+<style>
+  :root{
+    --ink:#000; --card:#303032; --sec:#3A3A3C; --accent:#0A84FF;
+    --t1:#F5F5F7; --t2:#98989D; --t3:#A1A1A6; --t4:#636366;
+    --line:rgba(255,255,255,.08);
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; background:var(--ink); color:var(--t1);
+    font:15px/1.75 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;
+    background-image:
+      radial-gradient(900px 500px at 15% -10%, rgba(90,80,255,.09), transparent 60%),
+      radial-gradient(700px 420px at 95% 0%, rgba(10,132,255,.09), transparent 60%);
+  }
+  header{
+    position:sticky; top:0; z-index:10; display:flex; align-items:center; gap:12px;
+    padding:12px 20px; border-bottom:1px solid var(--line);
+    background:rgba(28,28,30,.75); backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px);
+  }
+  .logo{display:grid;place-items:center;width:34px;height:34px;border-radius:11px;
+    background:linear-gradient(145deg,#3a3a5c,#232338); font-weight:700; font-size:13px; letter-spacing:.5px}
+  .title{font-weight:600;font-size:15px;max-width:46vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .meta{color:var(--t2);font-size:12.5px}
+  .spacer{flex:1}
+  .pill{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 12px;border-radius:999px;
+    background:var(--sec);color:var(--t1);font-size:12.5px;border:1px solid var(--line)}
+  .pill.accent{background:var(--accent);border-color:transparent;box-shadow:0 4px 16px rgba(10,132,255,.3)}
+  .dot{width:7px;height:7px;border-radius:50%;background:#32d74b;box-shadow:0 0 0 3px rgba(50,215,75,.18)}
+  main{max-width:900px;margin:0 auto;padding:24px 20px 80px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:24px;padding:34px 38px;line-height:1.85}
+  .card h1,.card h2,.card h3{line-height:1.35;margin:1.2em 0 .5em}
+  .card h1{font-size:24px} .card h2{font-size:20px} .card h3{font-size:17px}
+  .card p{margin:.7em 0}
+  .card table{border-collapse:collapse;width:100%;margin:1em 0;font-size:14px}
+  .card th,.card td{border:1px solid rgba(255,255,255,.14);padding:8px 10px;text-align:left}
+  .card img{max-width:100%;height:auto;border-radius:12px;margin:.6em 0}
+  .card blockquote{margin:1em 0;padding:.2em 0 .2em 16px;border-left:3px solid var(--accent);color:var(--t3)}
+  .card pre{background:#1b1b1d;border:1px solid var(--line);border-radius:12px;padding:14px;overflow:auto}
+  .card code{font-family:ui-monospace,Consolas,monospace;font-size:13px}
+  .state{max-width:560px;margin:14vh auto;text-align:center}
+  .state h1{font-size:20px;margin:0 0 8px}
+  .state p{color:var(--t2);margin:0 0 18px}
+  footer{margin-top:22px;color:var(--t4);font-size:12px;text-align:center}
+  #doc[contenteditable="true"]{outline:none}
+  #doc[contenteditable="true"]:focus{box-shadow:0 0 0 2px rgba(10,132,255,.35);border-radius:14px}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">LO</div>
+  <div class="title" id="docTitle">共享文档</div>
+  <div class="meta" id="docMeta"></div>
+  <div class="spacer"></div>
+  <span class="pill" id="rolePill">只读</span>
+  <span class="pill" id="onlinePill"><span class="dot"></span><span id="onlineNum">1</span> 人在线</span>
+</header>
+
+<main>
+  <div id="app">
+    <div class="state" id="loading">
+      <h1>正在打开共享文档…</h1>
+      <p>内容只会在你需要时从服务器读取</p>
+    </div>
+    <div class="card" id="docCard" hidden><div id="doc"></div></div>
+    <footer id="foot" hidden></footer>
+  </div>
+</main>
+
+<script type="module">
+const token = location.pathname.split('/').filter(Boolean).pop()
+const $ = (id) => document.getElementById(id)
+
+function showError(title, desc) {
+  $('loading').innerHTML = `<h1>${title}</h1><p>${desc}</p>`
+}
+
+async function main() {
+  let data
+  try {
+    const r = await fetch(`/api/share/${encodeURIComponent(token)}`, { cache: 'no-store' })
+    data = await r.json()
+    if (!r.ok) return showError(data.error ?? '链接不可用', '请向发起者索取新的链接')
+  } catch {
+    return showError('无法连接服务器', '请确认服务器已启动且网络可达')
+  }
+
+  const { role, doc } = data
+  $('docTitle').textContent = doc.title
+  $('docMeta').textContent = `${doc.kind.toUpperCase()} · ${(doc.size / 1024).toFixed(0)} KB`
+  $('rolePill').textContent = role === 'edit' ? '可编辑' : '只读'
+  if (role === 'edit') $('rolePill').classList.add('accent')
+
+  const docEl = $('doc')
+  docEl.innerHTML = doc.html || '<p style="color:var(--t2)">（这份文档没有可显示的正文）</p>'
+  $('loading').hidden = true
+  $('docCard').hidden = false
+  $('foot').hidden = false
+  $('foot').textContent = role === 'edit'
+    ? '你可以编辑这份文档，改动会实时同步给房间内其他人'
+    : '你是通过只读链接打开的，无法修改内容'
+  if (role === 'edit') docEl.setAttribute('contenteditable', 'true')
+
+  // 在线人数
+  try {
+    const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws?token=${encodeURIComponent(token)}`)
+    ws.onmessage = (ev) => {
+      if (typeof ev.data !== 'string') return
+      try {
+        const msg = JSON.parse(ev.data)
+        if (msg.type === 'presence') $('onlineNum').textContent = msg.online
+      } catch { /* 二进制帧交给协作层 */ }
+    }
+    ws.onclose = () => { $('onlinePill').style.opacity = '.45' }
+  } catch { /* WebSocket 不可用时仍可只读查看 */ }
+}
+
+main()
+</script>
+</body>
+</html>
