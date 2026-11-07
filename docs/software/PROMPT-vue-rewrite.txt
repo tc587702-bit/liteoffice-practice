@@ -2,7 +2,7 @@ LiteOffice Vue 重写任务书
 
 版本 v1.1   日期 2026-10-24
 用途：交给代码生成工具（墨刀 AI / 其他）执行
-冻结基准：docs/prototype/index.html、docs/prototype/editor.html
+冻结基准：docs/software/prototype/index.html、docs/software/prototype/editor.html
 （墨刀产物，只读，不修改任何一行）
 
 修订记录
@@ -305,7 +305,7 @@ LiteOffice Vue 重写任务书
 
 9. 与现有代码的关系
 
-  docs/prototype/ 是冻结基准，只读。新工程另开目录，不改动它。
+  docs/software/prototype/ 是冻结基准，只读。新工程另开目录，不改动它。
 
   现有 code/frontend/（Vue + ONLYOFFICE，39 个文件）与本任务的关系必须明确：
     若本任务产出被采纳为主线，现有实现归档，

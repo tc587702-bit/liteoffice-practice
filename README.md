@@ -18,11 +18,11 @@ liteoffice-practice/
 │   ├── mgmt/              沟通计划、风险计划、GitHub Projects 配置
 │   ├── assignments/       三次课程作业
 │   ├── software/          Vue 重写任务书、PDF 修复任务书
-│   └── prototype/         设计阶段交互原型（墨刀导出，只读基准）
+│   └── prototype/         交互原型（AI 生成，只读设计基准）
 └── tests/                 预留
 ```
 
-`docs/prototype/` 是**冻结的设计基准**：UI 的配色、间距、动效以它为准，只读不修改。
+`docs/software/prototype/` 是**冻结的设计基准**：UI 的配色、间距、动效以它为准，只读不修改。
 
 ---
 

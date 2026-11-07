@@ -273,6 +273,86 @@
 
 ---
 
+## 9. 与技术栈参考图的对照
+
+课堂参考图给出六层企业级结构。下表说明**哪些采用、哪些不用、为什么不用**——评审若问"为什么不用 LangChain / 为什么没有后端"，直接引用本节。
+
+### 9.1 六层取舍
+
+| 层（参考图） | 参考图推荐 | 本项目 | 说明 |
+|---|---|---|---|
+| 前端交互层 | React / Next.js / Vue / Nuxt | **Vue 3.5 + Vite 8 + TS 5.9** | 已有工程，不换栈 |
+| API 层（鉴权/限流/路由） | FastAPI / NestJS / Spring Boot / Kong | **不用** | 无后端。鉴权 = 用户自备 Key；限流 = 浏览器端节流；路由 = baseURL 配置 |
+| Agent 层（Prompt/工具/编排） | LangGraph / LangChain / LlamaIndex | **不用框架，自写状态机** | 见 9.2 |
+| 模型层（调用/路由/成本） | OpenAI / Claude / Gemini / LiteLLM | **DeepSeek API**（可切 Moonshot / 本地 Ollama） | 见 9.4 |
+| 数据层（业务/向量/缓存） | PostgreSQL / pgvector / Redis / Milvus | **IndexedDB + sessionStorage** | 单文档无需向量检索；协作场景才用 SQLite（见 9.6） |
+| 基础设施层（部署/监控/安全） | Docker / K8s / Prometheus / Vault | **静态文件托管** | 无服务器；监控 = 控制台 + 错误横幅；密钥 = sessionStorage |
+
+### 9.2 为什么不用 LangChain / LangGraph
+
+| 维度 | 事实 |
+|---|---|
+| 体积 | LangChain 约 150–300 KB，LangGraph 约 250–400 KB；本项目主包仅 208 KB |
+| 定位 | 二者面向多步 ReAct、多工具编排、多模型路由；本项目 H0 只需一次调用 |
+| 可解释性 | 自写状态机约 150 行，每步可调试、可讲解；框架会隐藏调用细节 |
+| 结论 | **H0/H1 自写；H2 若要单多步编排再评估 LangGraph**（不选 LangChain：其 AgentExecutor 已被官方迁移至 LangGraph） |
+
+### 9.3 为什么没有 API 层与数据层
+
+- **无多用户** → 不需要鉴权体系与用户表
+- **无多文档检索** → 不需要向量库；单文档问答把正文放进上下文即可
+- **无跨设备同步** → IndexedDB 足够
+- 需要后端的两件事（分享链接、多人协作）属另一条线，见 9.6
+
+### 9.4 模型 API 的直连验证（实测）
+
+浏览器直接调模型 API 的前提是服务商允许跨域。实测（OPTIONS 预检，Origin = `http://localhost:5195`）：
+
+| 服务商 | 预检结果 | 可否浏览器直连 |
+|---|---|---|
+| **DeepSeek** | 200，`Access-Control-Allow-Origin: http://localhost:5195`，允许 `authorization, content-type` | ✅ 可以 |
+| **Moonshot** | 204，同样回显 Origin 并放行两个头 | ✅ 可以 |
+| 智谱 bigmodel | 200，但**无任何 CORS 头** | ❌ 会被浏览器拦截 |
+| Ollama（本地） | 服务未启动，未测 | 需本地验证 |
+
+**结论**：选 DeepSeek，无需自建代理。
+
+### 9.5 Key 管理（直连的代价）
+
+因为 Key 在浏览器里，必须遵守三条：
+
+1. 用户自备 Key，**绝不内置**在代码或构建产物中
+2. 只存 `sessionStorage`，刷新即失效；不写 localStorage / IndexedDB / 日志
+3. 界面明示"使用你自己的 API Key，仅在本次会话有效"
+
+### 9.6 什么时候才需要升级到参考图的架构
+
+出现以下任一情况，才引入后端与数据库：
+
+| 触发条件 | 需要的层 |
+|---|---|
+| 多人协作 / 分享链接 | API 层 + 数据层（SQLite：documents / shares / updates / snapshots） |
+| 用户不想自备 Key | API 层（服务端代持 Key） |
+| 多文档检索问答 | 数据层（向量检索） |
+| 跨设备同步 | 账号体系 + 数据层 |
+
+> 已落地：`code/backend/` 用 Node 内置 `node:sqlite` + `ws` + `yjs` 实现了分享链接与多人同步，
+> 未引入任何框架与容器（无 Docker / K8s / Redis）。
+
+### 9.7 本项目最终技术栈
+
+```
+前端     Vue 3.5 · Vite 8 · TypeScript 5.9 · Pinia 4 · vue-router 5 · TailwindCSS 3.4
+解析     docx.ts / xlsx.ts / markdown.ts / zip.ts / xml.ts（自研）+ pdfjs-dist + xlsx
+模型     DeepSeek（OpenAI 兼容，浏览器直连）；可选 Moonshot / 本地 Ollama
+编排     自写：provider.ts + tools.ts + useAgent.ts（不引框架）
+存储     IndexedDB（会话）· sessionStorage（Key）· SQLite（协作，需后端时）
+部署     静态文件（单人）· Node + SQLite（协作）
+新增依赖  协作后端 3 个：ws · yjs · y-protocols；前端 0 个
+```
+
+---
+
 ## 设计要点小结
 
 | 维度 | 关键决策 |

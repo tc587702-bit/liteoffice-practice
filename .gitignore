@@ -155,3 +155,13 @@ code/core_engine/**/__pycache__/
 
 # 构建临时目录（sync-frontend.mjs 用）
 .tmp/
+# ---- 协作后端运行时数据 ----
+code/backend/data/
+code/backend/logs/
+
+# ---- Agent 服务 ----
+code/agent/logs/
+__pycache__/
+*.pyc
+.env
+.env.local

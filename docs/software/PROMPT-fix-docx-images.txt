@@ -1,0 +1,125 @@
+LiteOffice｜docx 导出丢图片 —— 修复任务书
+
+版本 v1.0   日期 2026-10-24
+对象：liteoffice-vue 工程（code/frontend，当前版本已在浏览器实测）
+原则：只修这一处，其余一律不许动。
+
+
+【问题：导出 docx 时图片全部丢失】
+
+实测证据（浏览器里真实操作，headless Edge + Puppeteer）
+
+  1. 导入 C:\deepseekharness\sample.docx（451 KB，含 7 张图、2 个表格）
+     编辑器 #/editor 显示：可编辑区 1 个、图片 7 张（均 data URL）、表格 2 个、正文 4660 字
+     → 解析侧完全正常，7 张图都拿到了
+
+  2. 点「保存下载」，得到 sample.docx
+       文件大小：35,911 字节     （原文件 451,586 字节）
+       解包后条目数：8
+       word/document.xml   22,895 字节
+       word/styles.xml / numbering.xml / core.xml / app.xml
+       word/media/  里的文件数 = 0        ← 图片全丢
+       word/_rels/document.xml.rels 里没有任何图片关系
+
+  3. 对比：解包后 word/document.xml 里能搜到我们改进去的文字
+       has_mark = True
+     → 文字导出是对的，只有图片没写回
+
+判断
+  src/lib/docx.ts 的 buildDocx(html) 只把文字与结构序列化成 OOXML，
+  遇到 <img src="data:image/..."> 直接跳过：
+    - 没有解码 data URL 写进 word/media/
+    - 没有向 word/_rels/document.xml.rels 添加关系
+    - 没有在 [Content_Types].xml 声明 png/jpeg 扩展名
+    - 没有生成 <w:drawing><wp:inline><a:blip r:embed="rIdN"/> 结构
+
+
+【要求：导出必须带图片】
+
+只改 src/lib/docx.ts 里的 buildDocx（以及它调用到的辅助函数，如果确实需要）。
+
+  1. 遍历 HTML 里的每个 <img>
+       支持 src="data:image/png;base64,..." 与 data:image/jpeg;base64,...
+       不支持的格式（gif/webp/svg）要么转成 png，要么明确跳过并在返回值里报告，
+       不允许静默丢弃
+
+  2. 每个图片写一个文件到 word/media/
+       命名 image1.png、image2.jpeg…（按 MIME 决定扩展名）
+       base64 必须解码成真实二进制，不能写成文本
+
+  3. 向 word/_rels/document.xml.rels 追加关系
+       <Relationship Id="rIdImg1" Type=".../image" Target="media/image1.png"/>
+       注意 Id 不能与已有 rId 冲突（样式表等已占用了若干 Id）
+
+  4. 在 [Content_Types].xml 里补 Default 声明
+       <Default Extension="png" ContentType="image/png"/>
+       <Default Extension="jpeg" ContentType="image/jpeg"/>
+
+  5. 在 word/document.xml 对应位置生成标准图片结构（必须能被 Word / LibreOffice 打开）
+       <w:p><w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0">
+         <wp:extent cx="..." cy="..."/>
+         <wp:docPr id="1" name="Picture 1"/>
+         <a:graphic><a:graphicData uri=".../picture">
+           <pic:pic>
+             <pic:nvPicPr><pic:cNvPr id="1" name="image1.png"/><pic:cNvPicPr/></pic:nvPicPr>
+             <pic:blipFill><a:blip r:embed="rIdImg1"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>
+             <pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="..." cy="..."/></a:xfrm>
+               <a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>
+           </pic:pic>
+         </a:graphicData></a:graphic>
+       </wp:inline></w:drawing></w:r></w:p>
+
+  6. 尺寸：EMU = 像素 × 9525
+       优先用 <img> 上的 width/height 属性（或解析时保存的原始像素尺寸）；
+       都没有时按 600×(600/宽高比) 估算，不允许出现 0 或负值
+
+  7. 图片数量与顺序必须与 HTML 中一致，不允许合并或重排
+
+【禁止事项】
+
+  - 不要改 docx 的解析逻辑（parseDocx / 表格 / 列表 / 编号），它已验收通过
+  - 不要改 xlsx / pdf / markdown / 状态管理 / 样式
+  - 不要引入新的第三方依赖（不装 docx 库、不装 jszip 之外的任何包）
+  - 不要用占位图或空图片凑数
+  - 不要把 base64 直接塞进 XML 文本
+
+
+【验收：必须自己跑一遍并把输出贴出来】
+
+新增一个自检脚本 scripts/check-docx-export.mjs（与已有的 check-pdf.mjs 同风格），
+用 Node 跑，不参与构建：
+
+  用法：node scripts/check-docx-export.mjs <输入.docx>
+
+  它要做的事：
+    1. 用 parseDocx 读输入文件，统计图片数 N
+    2. 用 buildDocx 把解析结果导出成字节
+    3. 解包导出的字节，统计 word/media/ 下文件数 M
+    4. 断言 M === N，并打印：
+         输入图片数 / 导出图片数 / 导出字节大小 / 是否含 r:embed
+    5. 再用 parseDocx 读一遍导出结果，确认图片数仍为 N
+    6. 任一项不满足 → 退出码 1
+
+  期望输出（用 C:\deepseekharness\sample.docx 跑的实测基准）：
+         输入图片数 = 7
+         导出图片数 = 7
+         导出大小 ≥ 300,000 字节（当前是 35,911，明显偏小）
+         含 r:embed = true
+         重新解析后图片数 = 7
+
+另外在交付说明里回答：
+  - buildDocx 之外还改了哪些文件（应为 0 个）
+  - 有没有新增依赖（应为 0 个）
+  - npm run build 是否仍然通过，vue-tsc 是否零错误
+  - 导出的 docx 用 LibreOffice 或 Word 能否正常打开（贴一句结论）
+
+
+【本轮已验收通过、不许回归的部分】
+
+  docx 解析    84 块 / 4016 字 / 7 图（data URL）/ 2 表 / 有序编号正确
+  PDF 提取     chk.pdf 10 页 5611 字；margin_test 1 页 160 字；
+               re2 10 页 5145 字；re_tmp 8 页 5092 字（scripts/check-pdf.mjs）
+  xlsx         小表格 2 表 101ms；6.7 MB 大表截断到 2 万行有提示
+  md           标题/列表/表格/代码块正常，<script> 与 onerror 被转义
+  IndexedDB    刷新后内容、图片、表格都恢复
+  主题         #303032 卡片 / #0A84FF 主按钮 / #F5F5F7 正文，像素级命中

@@ -98,7 +98,7 @@ LiteOffice Vue 修复任务书
         顶栏背景与模糊              （rgba(28,28,30,0.75) + blur(20px)）
         正文与副标题色              （#F5F5F7 / #98989D）
         主要间距                    （8/16/24/32/48 的倍数）
-      另外说明：与 docs/prototype/index.html 相比，哪些地方做不到一致，如实列出
+      另外说明：与 docs/software/prototype/index.html 相比，哪些地方做不到一致，如实列出
 
 
 【交付物】
