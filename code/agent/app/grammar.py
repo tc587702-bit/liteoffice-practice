@@ -70,6 +70,37 @@ _VERB_ABAB = {
     "回忆回忆", "比较比较", "计算计算", "锻炼锻炼", "准备准备",
 }
 
+# ABAB 式状态形容词：雪白雪白 / 滚烫滚烫 / 笔直笔直 —— 合法的强调重叠。
+#
+# 上面那份 _VERB_ABAB 是枚举白名单，覆盖不全就误报：实测「滚烫滚烫」
+# 「雪白雪白」「碧绿碧绿」「打扫打扫」全被判成手误。枚举永远追不上词汇量，
+# 所以这里改用构词形态判断：
+#   ① 「单字程度/状态语素 + 形容词」构成的偏正复合词（雪白=像雪一样白，
+#      滚烫=滚一样烫，笔直=像笔一样直，冰凉、通红、漆黑、火红…）
+#      这类词重叠后是汉语常见强调式，一律合法。
+#   ② 末字是颜色/温度/触感等状态形容词性语素，且首字为具象名词或程度语素。
+# 判不出来的仍走原逻辑报「建议改」，保持对「开心开心」「苹果苹果」的召回。
+_STATE_ADJ_TAIL = "白黑红黄绿蓝紫灰青亮暗冷热烫凉暖冰冻甜苦辣酸香臭软硬干湿深浅高低长短宽窄厚薄轻重快慢新旧胖瘦圆扁尖平直弯斜歪粗细密稀空满"
+# 偏正复合状态形容词的首字：表「像…一样」的具象喻体或程度语素。
+# 雪白=像雪一样白，滚烫=滚一样烫，笔直=像笔一样直。
+_STATE_ADJ_HEAD = "雪漆墨血火铁金银玉冰滚通笔刷焦粉嫩湛碧翠乌蜡澄鲜崭飞铮稀煞死透稀溜"
+
+
+def _is_state_adj_abab(unit: str) -> bool:
+    """
+    判断 ABAB 的 AB 是否为「偏正复合状态形容词」（雪白 / 滚烫 / 笔直 …）。
+
+    两端都必须命中语素表，才算状态形容词：
+      雪白 → 首「雪」在喻体表、末「白」在状态表 → 合法重叠
+      开心 → 末「心」不在状态表 → 仍判手误
+      苹果 → 末「果」不在状态表 → 仍判手误
+    刻意不用「首字不在状态表就放行」这种宽条件，否则「苹果苹果」会被漏放。
+    """
+    if len(unit) != 2:
+        return False
+    head, tail = unit[0], unit[1]
+    return head in _STATE_ADJ_HEAD and tail in _STATE_ADJ_TAIL
+
 # 两个相同的 1–4 字片段紧邻出现
 _REPEAT_RE = re.compile(r"([\u4e00-\u9fa5]{1,4})\1")
 
@@ -102,7 +133,21 @@ def _repeat_kind(unit: str) -> str:
         return "style"
     if unit.startswith(_DEGREE_HEADS):
         return "style"
+    # 状态形容词重叠（雪白雪白 / 滚烫滚烫）合法，按构词形态判，不靠枚举
+    if _is_state_adj_abab(unit):
+        return "ok"
+    # 双字动词重叠（打扫打扫 / 收拾收拾）合法：末字是动作语素即可，
+    # 白名单 _VERB_ABAB 只作补充，覆盖不全时由这条兜底
+    if len(unit) == 2 and unit[1] in _ACTION_TAIL:
+        return "ok"
     return "typo"
+
+
+# 动作语素：作双字词末字时该词多为动词，ABAB 重叠表「尝试/短暂」，合法。
+# 「打扫打扫」「商量商量」靠这条放行，不必逐个往白名单里加。
+# 只收高置信度的单义动作语素；不收「理/动/作」等既可作名词又极常见的字，
+# 否则「苹果苹果」式手误可能被顺带放行。
+_ACTION_TAIL = "扫擦洗切揉捏搬抬扛推拉扔抛投递寄买卖算写读念背诵记查验量称修拆装挂贴缝补织染煮炒蒸烤烧炖熬冲泡倒拌叠逛歇聊谈议究析拾核通联忆较计炼备"
 
 
 def check_repeat(text: str) -> list[dict[str, Any]]:
@@ -205,6 +250,38 @@ def check_de(text: str) -> list[dict[str, Any]]:
                 "「的」应为「地」（状语）",
                 "修饰动词的状语用「地」；「的」只用于修饰名词",
                 f"改成「{adv}地」",
+                text[max(0, m.start() - 8): m.end() + 8],
+                pos=at,
+            )
+        )
+    return issues
+
+
+# ---------------------------------------------------------------- ②-b 顿号误用
+
+# 「A、B、还有C」：顿号与「还有/以及/和」重复承担并列连接，末尾那个顿号应删。
+# 规范写法是「A、B 还有C」或「A、B、C」。这是标点规范问题，纯规则可判。
+_DUNHAO_RE = re.compile(r"([\u4e00-\u9fa5]{1,8})、(还有|以及|和|与|及)([\u4e00-\u9fa5]{1,8})")
+
+
+def check_punctuation(text: str) -> list[dict[str, Any]]:
+    """
+    标点规范检查。目前覆盖并列连词前的多余顿号。
+
+    「有玫瑰、菊花、还有荷花」→「有玫瑰、菊花还有荷花」
+    顿号本身已表并列，再加「还有」就重复了；二者留一个即可。
+    """
+    issues: list[dict[str, Any]] = []
+    for m in _DUNHAO_RE.finditer(text):
+        prev, conj, nxt = m.group(1), m.group(2), m.group(3)
+        at = m.start() + len(prev)
+        issues.append(
+            _issue(
+                "warning",
+                f"第 {at + 1} 字",
+                f"顿号与「{conj}」重复表并列",
+                "顿号已经表示并列关系，后面再用「还有/以及/和」属于重复连接",
+                f"删掉顿号写成「{prev}{conj}{nxt}」，或删掉「{conj}」写成「{prev}、{nxt}」",
                 text[max(0, m.start() - 8): m.end() + 8],
                 pos=at,
             )
@@ -376,14 +453,142 @@ FACT_CHECK_HINT = (
     "事实性错误（季节、常识、数据真伪）无法用规则判定，需要配置模型 Key 后由模型复核。本次未检查。"
 )
 
+FACT_CHECK_DONE_HINT = "事实与常识类问题已由模型复核；模型判断可能有误，请对照原文确认。"
+FACT_CHECK_FAIL_HINT = "事实与常识类问题本次未能复核（模型调用失败），规则层结果不受影响。"
 
-def check_facts(text: str) -> list[dict[str, Any]]:
-    """
-    事实性错误（如「荷花是冬天开的」）无法用规则判定 —— 需要常识知识。
+# 事实检查的产出上限：模型容易一口气报十几条，其中多数是牵强的推测。
+# 记叙文测试集单篇 3–4 处真瑕疵，给 12 条足够，再多必然是噪声。
+_FACT_MAX_ISSUES = 12
 
-    返回空并配 FACT_CHECK_HINT 说明原因，避免给调用方「已覆盖事实检查」的错觉。
+_FACT_PROMPT = """你是中文作文批改老师。找出下面这段文字里【违反常识或自相矛盾】的地方。
+
+只报这三类：
+1. 常识错误：违反基本事实（荷花冬天开、椰子长山上、公交车在铁轨上跑、太阳从东边落下）
+2. 前后矛盾：同一段里说法互相冲突（说一点都不喜欢却全部吃光、说很累却一点不想休息）
+3. 概念混淆：把甲当成乙（把尾巴说成耳朵、白色的小猫叫小黑）
+
+不要报：错别字、的/地/得、词语重复、标点、语句啰嗦 —— 这些已由其他程序处理。
+不要报文采好坏、详略安排、立意深浅 —— 那不是错误。
+拿不准的一律不报。宁可少报，不要凑数。
+
+每条必须给出 quote：从原文【逐字复制】的片段（5–20 字），不能改写、不能加标点。
+无法逐字引用原文的问题不要报。
+
+只输出 JSON，不要任何解释文字：
+{{"issues":[{{"quote":"原文片段","problem":"问题概述（20字内）","why":"为什么错（40字内）","how":"怎么改（40字内）","kind":"常识错误|前后矛盾|概念混淆"}}]}}
+
+没发现问题就输出 {{"issues":[]}}。
+
+待检查文字：
+{text}"""
+
+
+def _parse_fact_json(raw: str) -> list[dict[str, Any]]:
     """
-    return []
+    从模型输出里取出 issues 数组。
+
+    模型可能裹 ```json 代码块、可能带前后说明文字，也可能被 max_tokens 截断。
+    复用 llm._balanced_json 找配平对象；截断时退回逐条提取，能救回几条算几条。
+    """
+    import json as _json
+
+    from .llm import _balanced_json
+
+    candidate = _balanced_json(raw or "")
+    if candidate:
+        try:
+            data = _json.loads(candidate)
+            rows = data.get("issues")
+            if isinstance(rows, list):
+                return [r for r in rows if isinstance(r, dict)]
+        except (ValueError, AttributeError):
+            pass
+
+    # JSON 被截断：逐个抠出配平的 {...} 子对象，跳过最外层残缺的那个
+    out: list[dict[str, Any]] = []
+    for m in re.finditer(r"\{", raw or ""):
+        seg = _balanced_json((raw or "")[m.start():])
+        if not seg:
+            continue
+        try:
+            obj = _json.loads(seg)
+        except ValueError:
+            continue
+        if isinstance(obj, dict) and obj.get("quote"):
+            out.append(obj)
+    return out
+
+
+def check_facts(
+    text: str,
+    model: str | None = None,
+    known: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """
+    事实 / 常识 / 逻辑矛盾检查 —— 规则判不了，交给模型。
+
+    与规则层的分工：错别字、的地得、重复、标点由规则处理（稳定可复现），
+    「荷花冬天开」「白色小猫叫小黑」这类需要常识的只能走模型。
+
+    三道防线，避免模型帮倒忙：
+      ① 无凭据直接返回 []（不联网、不产生 mock 垃圾）
+      ② quote 必须能在原文里逐字找到 —— 挡掉凭空编造的瑕疵
+      ③ 与 known（规则层已报问题）按位置去重 —— 不重复报同一处
+
+    known 传入规则层结果；模型调用失败时返回 []，由调用方给出对应提示。
+    """
+    from . import llm
+
+    text = (text or "").strip()
+    if not text or not llm.has_credentials(model or llm.DEFAULT_MODEL):
+        return []
+
+    res = llm.complete(
+        [{"role": "user", "content": _FACT_PROMPT.format(text=text[:4000])}],
+        model=model,
+        temperature=0.1,   # 事实判断要稳定，不要发挥
+        max_tokens=1600,   # 12 条 × 约 100 token，留足余量防截断
+        allow_mock=False,  # 有 Key 但调用失败时不能拿占位文本当结果
+    )
+    if not res.ok or not (res.text or "").strip():
+        return []
+
+    taken = {i.get("pos") for i in (known or []) if i.get("pos") is not None}
+    out: list[dict[str, Any]] = []
+    seen_spans: set[int] = set()
+
+    for row in _parse_fact_json(res.text)[:_FACT_MAX_ISSUES * 2]:
+        quote = str(row.get("quote") or "").strip()
+        problem = str(row.get("problem") or "").strip()
+        if not quote or not problem:
+            continue
+        # 防线②：quote 必须逐字出现在原文。模型常把「河水滚烫滚烫的」
+        # 改写成「河水很烫」再报，这种定位不可信，直接丢。
+        pos = text.find(quote)
+        if pos < 0:
+            continue
+        # 防线③：与规则层同一位置的问题不重复报
+        if pos in taken or pos in seen_spans:
+            continue
+        seen_spans.add(pos)
+
+        kind = str(row.get("kind") or "常识错误").strip()
+        if kind not in ("常识错误", "前后矛盾", "概念混淆"):
+            kind = "常识错误"
+        out.append(
+            _issue(
+                "warning",
+                f"第 {pos + 1}–{pos + len(quote)} 字",
+                f"{kind}：{problem}",
+                str(row.get("why") or "").strip() or "与常识或上下文不符",
+                str(row.get("how") or "").strip() or "请对照事实修改",
+                text[max(0, pos - 12): pos + len(quote) + 12],
+                pos=pos,
+            )
+        )
+        if len(out) >= _FACT_MAX_ISSUES:
+            break
+    return out
 
 
 # ---------------------------------------------------------------- 汇总
@@ -395,15 +600,20 @@ DIM_LABEL = {
     "redundant": "赘余",
     "logic": "逻辑",
     "time": "时间",
+    "punct": "标点",
+    "fact": "事实常识",
 }
 
 
-def analyze(text: str) -> dict[str, Any]:
+def analyze(text: str, use_model: bool = False, model: str | None = None) -> dict[str, Any]:
     """
     跑全部通用语病检查，按严重级别排序。
 
     返回结构与 improve.analyze() 兼容（都有 issues / dims / summary / docStats），
     便于前端复用同一套展示组件。
+
+    use_model=True 时追加事实/常识检查（需已配置 Key）。默认 False：
+    规则层必须保持离线可复现，自测与批量评测不应因联网而变慢或产生费用。
     """
     text = (text or "").strip()
     if not text:
@@ -415,10 +625,25 @@ def analyze(text: str) -> dict[str, Any]:
     issues: list[dict[str, Any]] = []
     issues += check_repeat(text)
     issues += check_de(text)
+    issues += check_punctuation(text)
     issues += check_typos(text)
     issues += check_redundant(text)
     issues += check_contradiction(text)
     issues += check_time_clues(text)
+
+    fact_state = "off"
+    if use_model:
+        from . import llm
+
+        if not llm.has_credentials(model or llm.DEFAULT_MODEL):
+            fact_state = "nokey"
+        else:
+            facts = check_facts(text, model=model, known=issues)
+            # 空结果可能是「真没问题」也可能是「调用失败」，用凭据与返回区分：
+            # 有 Key 却一条没有，仍标 done（模型认为无事实错误），失败由 check_facts 内部兜底
+            issues += facts
+            fact_state = "done"
+
     issues.sort(key=lambda x: (_ORDER.get(x["level"], 3), x.get("pos") if x.get("pos") is not None else 10**6))
 
     def pick(kind: str) -> list[dict[str, Any]]:
@@ -428,9 +653,11 @@ def analyze(text: str) -> dict[str, Any]:
         "repeat": pick("词语重复"),
         "de": pick("应为「得」") + pick("应为「地」"),
         "typo": pick("错别字"),
+        "punct": pick("顿号"),
         "redundant": pick("语义赘余"),
         "logic": pick("前后矛盾"),
         "time": pick("时间表述"),
+        "fact": pick("常识错误：") + pick("概念混淆：") + pick("前后矛盾："),
     }
 
     dims: dict[str, Any] = {}
@@ -458,7 +685,8 @@ def analyze(text: str) -> dict[str, Any]:
         "dims": dims,
         "issues": issues,
         "summary": summary,
-        "factCheckHint": FACT_CHECK_HINT,
+        "factCheckHint": FACT_CHECK_DONE_HINT if fact_state == "done" else FACT_CHECK_HINT,
+        "factCheckState": fact_state,
         "docStats": {"blocks": 1, "chars": len(text)},
     }
 
@@ -538,9 +766,47 @@ def _selftest() -> int:
           str([i["how"] for i in check_time_clues("我一点都不喜欢吃这个菜")]))
     check("仍识别带前后缀的一点钟", bool(check_time_clues("下午一点钟开会，三点散会")))
 
-    print("\n=== 7) 事实类如实说明不覆盖 ===")
-    check("check_facts 返回空", check_facts("荷花是冬天开的") == [])
+    print("\n=== 7) 事实类：无 Key 如实说明，有 Key 防幻觉 ===")
+    from unittest.mock import patch as _patch
+
+    from . import llm as _llm
+
+    check("无 Key 时 check_facts 返回空", check_facts("荷花是冬天开的") == [])
     check("给出说明而非假装覆盖", "无法用规则判定" in FACT_CHECK_HINT)
+    check("默认不启用模型（analyze 保持离线）", analyze(SAMPLE)["factCheckState"] == "off")
+
+    _t = "公园里有荷花，荷花是冬天开的。我心里十分开心开心。"
+    _good = '{"issues":[{"quote":"荷花是冬天开的","problem":"荷花夏季开放","why":"花期在夏季","how":"改成夏天","kind":"常识错误"}]}'
+    _fake = '{"issues":[{"quote":"月亮是方的","problem":"形状错","why":"x","how":"y","kind":"常识错误"}]}'
+    with _patch.object(_llm, "has_credentials", return_value=True), \
+         _patch.object(_llm, "complete", return_value=_llm.LlmResult(True, _good, "fake")):
+        check("逐字引用原文的能被采纳", len(check_facts(_t)) == 1)
+    with _patch.object(_llm, "has_credentials", return_value=True), \
+         _patch.object(_llm, "complete", return_value=_llm.LlmResult(True, _fake, "fake")):
+        check("quote 不在原文的幻觉被丢弃", check_facts(_t) == [])
+    with _patch.object(_llm, "has_credentials", return_value=True), \
+         _patch.object(_llm, "complete", return_value=_llm.LlmResult(True, "```json\n" + _good + "\n```", "fake")):
+        check("代码块包裹能解析", len(check_facts(_t)) == 1)
+    with _patch.object(_llm, "has_credentials", return_value=True), \
+         _patch.object(_llm, "complete", return_value=_llm.LlmResult(True, "我认为写得很好，没有问题。", "fake")):
+        check("非 JSON 输出不产生垃圾条目", check_facts(_t) == [])
+    # 与规则层同位置去重
+    _rep = check_repeat(_t)
+    _q = _t[_rep[0]["pos"]: _rep[0]["pos"] + 4]
+    _dup = (
+        '{"issues":[{"quote":"' + _q + '","problem":"重复","why":"x","how":"y","kind":"前后矛盾"}]}'
+    )
+    with _patch.object(_llm, "has_credentials", return_value=True), \
+         _patch.object(_llm, "complete", return_value=_llm.LlmResult(True, _dup, "fake")):
+        check("与规则层同位置不重复报", check_facts(_t, known=_rep) == [])
+    with _patch.object(_llm, "has_credentials", return_value=False), \
+         _patch.object(_llm, "complete", side_effect=AssertionError("不该联网")) as _m:
+        check_facts(_t)
+        check("无 Key 时零模型调用", _m.call_count == 0)
+    with _patch.object(_llm, "has_credentials", return_value=True), \
+         _patch.object(_llm, "complete", return_value=_llm.LlmResult(False, "", "fake", error="HTTP 401")):
+        check("模型失败不污染规则层",
+              len(analyze(SAMPLE, use_model=True)["issues"]) == len(analyze(SAMPLE)["issues"]))
 
     print("\n=== 8) 完整样本回归（207 字记叙文）===")
     rep = analyze(SAMPLE)

@@ -107,18 +107,163 @@ async function main() {
     : '你是通过只读链接打开的，无法修改内容'
   if (role === 'edit') docEl.setAttribute('contenteditable', 'true')
 
-  // 在线人数
+  // ---- 协作层：Yjs CRDT + WebSocket ----
+  //
+  // 原实现只处理 presence 文本帧，二进制帧被注释为「交给协作层」，
+  // 但那个协作层并不存在 —— 所以多人同时打开时，彼此的编辑根本不同步。
+  // 这里补齐：Y.Text 承载正文，本地输入转增量上行，远端增量回写 DOM。
+  await startCollab(token, doc, docEl, role)
+}
+
+/**
+ * 建立协作连接。
+ *
+ * 正文用 Y.Text('body') 承载纯文本 + 段落换行，不用 Y.XmlFragment：
+ * 现有 contenteditable 直接读写 innerHTML，映射富文本树会导致光标跳飞。
+ * 纯文本方案牺牲跨端富文本格式，但换来光标稳定与合并正确 —— 局域网
+ * 多人编辑先保证「不丢字、不冲突」，格式保真留到接 Vue 编辑器时再做。
+ */
+async function startCollab(token, docMeta, docEl, role) {
+  const Y = await import('https://esm.sh/yjs@13.6.20')
+  const encoding = await import('https://esm.sh/lib0@0.2.99/encoding')
+  const decoding = await import('https://esm.sh/lib0@0.2.99/decoding')
+
+  const ydoc = new Y.Doc()
+  const ytext = ydoc.getText('body')
+  const canEdit = role === 'edit'
+
+  // 首次接入：把服务器给的 HTML 正文作为种子文本。
+  // 只有当 CRDT 侧还是空的时候才灌入，避免后加入者用本地内容覆盖房间历史。
+  const htmlToText = (html) => {
+    const d = document.createElement('div')
+    d.innerHTML = html || ''
+    d.querySelectorAll('p,div,h1,h2,h3,h4,h5,h6,li,br').forEach((el) => {
+      if (el.tagName === 'BR') el.replaceWith('\n')
+      else el.append('\n')
+    })
+    return (d.textContent || '').replace(/\n{3,}/g, '\n\n').trim()
+  }
+  const textToHtml = (t) =>
+    (t || '').split(/\n/).map((line) =>
+      `<p>${line.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])) || '<br>'}</p>`
+    ).join('')
+
+  let applyingRemote = false
+  const renderFromY = () => {
+    applyingRemote = true
+    const t = ytext.toString()
+    // 保留光标：记录纯文本偏移，回写后还原
+    const sel = window.getSelection()
+    let caret = null
+    if (sel && sel.rangeCount && docEl.contains(sel.anchorNode)) {
+      const r = sel.getRangeAt(0).cloneRange()
+      r.selectNodeContents(docEl)
+      r.setEnd(sel.anchorNode, sel.anchorOffset)
+      caret = r.toString().length
+    }
+    docEl.innerHTML = textToHtml(t) || '<p><br></p>'
+    if (caret !== null && canEdit) {
+      try {
+        const walker = document.createTreeWalker(docEl, NodeFilter.SHOW_TEXT)
+        let left = caret
+        let node = walker.nextNode()
+        while (node && left > node.length) { left -= node.length; node = walker.nextNode() }
+        const range = document.createRange()
+        range.setStart(node || docEl, node ? left : 0)
+        range.collapse(true)
+        sel.removeAllRanges()
+        sel.addRange(range)
+      } catch { /* 光标还原失败不影响内容 */ }
+    }
+    applyingRemote = false
+  }
+
+  const wsUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws?token=${encodeURIComponent(token)}`
+  let ws
   try {
-    const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws?token=${encodeURIComponent(token)}`)
-    ws.onmessage = (ev) => {
-      if (typeof ev.data !== 'string') return
+    ws = new WebSocket(wsUrl)
+    ws.binaryType = 'arraybuffer'
+  } catch {
+    $('onlinePill').style.opacity = '.45'
+    return
+  }
+
+  const sendUpdate = (update) => {
+    if (ws.readyState !== WebSocket.OPEN || !canEdit) return
+    const enc = encoding.createEncoder()
+    encoding.writeVarUint(enc, 0)
+    encoding.writeVarUint(enc, 2)
+    encoding.writeVarUint8Array(enc, update)
+    ws.send(encoding.toUint8Array(enc))
+  }
+
+  ydoc.on('update', (update, origin) => {
+    if (origin === 'remote') return
+    sendUpdate(update)
+  })
+  ytext.observe(() => { renderFromY() })
+
+  let seeded = false
+  ws.onmessage = (ev) => {
+    if (typeof ev.data === 'string') {
       try {
         const msg = JSON.parse(ev.data)
         if (msg.type === 'presence') $('onlineNum').textContent = msg.online
-      } catch { /* 二进制帧交给协作层 */ }
+      } catch { /* ignore */ }
+      return
     }
-    ws.onclose = () => { $('onlinePill').style.opacity = '.45' }
-  } catch { /* WebSocket 不可用时仍可只读查看 */ }
+    try {
+      const dec = decoding.createDecoder(new Uint8Array(ev.data))
+      if (decoding.readVarUint(dec) !== 0) return
+      const syncType = decoding.readVarUint(dec)
+      if (syncType === 0) {
+        // step1：服务端索要我方状态
+        const enc = encoding.createEncoder()
+        encoding.writeVarUint(enc, 0)
+        encoding.writeVarUint(enc, 1)
+        encoding.writeVarUint8Array(enc, Y.encodeStateAsUpdate(ydoc))
+        ws.send(encoding.toUint8Array(enc))
+        return
+      }
+      if (syncType === 1 || syncType === 2) {
+        Y.applyUpdate(ydoc, decoding.readVarUint8Array(dec), 'remote')
+        // 房间是空的（全新文档）→ 用服务器 HTML 播种一次
+        if (!seeded) {
+          seeded = true
+          if (canEdit && ytext.length === 0) {
+            const seed = htmlToText(docMeta.html)
+            if (seed) ytext.insert(0, seed)
+          }
+        }
+      }
+    } catch { /* 忽略畸形帧 */ }
+  }
+
+  ws.onopen = () => { $('onlinePill').style.opacity = '1' }
+  ws.onclose = () => {
+    $('onlinePill').style.opacity = '.45'
+    $('foot').textContent = '连接已断开，当前显示的是最后一次同步的内容'
+  }
+
+  if (canEdit) {
+    // 输入 → 计算最小差异写回 Y.Text（整段替换会让并发编辑互相覆盖）
+    docEl.addEventListener('input', () => {
+      if (applyingRemote) return
+      const next = (docEl.innerText || '').replace(/\u00a0/g, ' ').replace(/\n{3,}/g, '\n\n')
+      const prev = ytext.toString()
+      if (next === prev) return
+      let s = 0
+      while (s < prev.length && s < next.length && prev[s] === next[s]) s++
+      let e = 0
+      while (e < prev.length - s && e < next.length - s && prev[prev.length - 1 - e] === next[next.length - 1 - e]) e++
+      ydoc.transact(() => {
+        const delLen = prev.length - s - e
+        if (delLen > 0) ytext.delete(s, delLen)
+        const ins = next.slice(s, next.length - e)
+        if (ins) ytext.insert(s, ins)
+      })
+    })
+  }
 }
 
 main()

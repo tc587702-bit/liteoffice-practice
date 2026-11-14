@@ -533,9 +533,12 @@ def check_prose(html: str) -> list[dict]:
     return issues
 
 
-def analyze(html: str, genre: str | None = None) -> dict[str, Any]:
+def analyze(html: str, genre: str | None = None, use_model: bool = False) -> dict[str, Any]:
     """
     文档优化建议。
+
+    use_model=True 时追加事实/常识检查（需已配置模型 Key）。默认 False，
+    保持规则层离线可复现；前端「检查」按钮可按用户选择开启。
 
     文体分流（关键）：
       · 公文        → 原有四维（结构/数据/表达/体例）：三段式、数字带单位、抬头落款
@@ -570,7 +573,7 @@ def analyze(html: str, genre: str | None = None) -> dict[str, Any]:
         _, w_issues = check_writing(html)
         _, f_issues = check_format(html)
         # 公文也跑通用语病：的/得/地、错字、重复词对公文同样成立
-        g_issues = grammar.analyze(plain)["issues"]
+        g_issues = grammar.analyze(plain, use_model=use_model)["issues"]
         for it in g_issues:
             it.setdefault("block", None)
 
@@ -599,7 +602,7 @@ def analyze(html: str, genre: str | None = None) -> dict[str, Any]:
         clean_msg = "没有发现明显问题，结构和表达都符合公文的常见写法。"
         genre_label = "公文" if is_gongwen else "通用"
     else:
-        g_rep = grammar.analyze(plain)
+        g_rep = grammar.analyze(plain, use_model=use_model)
         issues = g_rep["issues"]
         _attach_blocks(issues, html, plain)
         _add_anchors(issues, html, plain)
@@ -667,5 +670,7 @@ def analyze(html: str, genre: str | None = None) -> dict[str, Any]:
             f"按「{genre_label}」检查语病与逻辑；未套用公文的三段式结构、"
             "数字单位与抬头落款规则。"
         )
-        out["factCheckHint"] = grammar.FACT_CHECK_HINT
+        # 沿用 grammar 层的真实状态：已用模型复核过就不能再说"本次未检查"
+        out["factCheckHint"] = g_rep.get("factCheckHint", grammar.FACT_CHECK_HINT)
+        out["factCheckState"] = g_rep.get("factCheckState", "off")
     return out

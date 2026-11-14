@@ -309,10 +309,15 @@ wss.on('connection', (ws, { docId, role, token }) => {
   room.conns.add(ws)
   if (room.cleanupTimer) { clearTimeout(room.cleanupTimer); room.cleanupTimer = null }
 
-  // 初次同步：把当前状态发给新连接
+  // 初次同步：把当前状态发给新连接。
+  //
+  // 必须发 step2（我方的完整状态），不能发 step1（向对方索要状态）：
+  // 新打开的客户端 Y.Doc 是空的，收到 step1 只会回一个空状态，
+  // 于是它永远拿不到房间里已有的内容 —— 实测新连接正文为空。
+  // 发 step2 后新连接立刻拿到历史；它自己的本地改动仍会通过 update 帧上行。
   const enc = encoding.createEncoder()
   encoding.writeVarUint(enc, 0)
-  syncProtocol.writeSyncStep1(enc, room.doc)
+  syncProtocol.writeSyncStep2(enc, room.doc)
   ws.send(encoding.toUint8Array(enc))
 
   // 广播在线人数

@@ -176,3 +176,7 @@ venv/
 # ---- 抓取/临时产物 ----
 .tmp/
 _scratch/
+
+# SQLite 运行时文件（不要提交）
+*.db-shm
+*.db-wal
