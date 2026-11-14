@@ -1,8 +1,5 @@
 import { entryBytes, listByPrefix, unzip, type ZipArchive } from './zip'
 import { attr, childElements, descendants, escapeXml, firstChild, firstDescendant, parseXmlFromZip } from './xml'
-import { createLogger } from './logger'
-
-const log = createLogger('docx')
 
 /* ------------------------------------------------------------------ */
 /* 类型                                                                 */
@@ -548,8 +545,7 @@ export async function parseDocx(input: ArrayBuffer, options: ParseOptions = {}):
         // 结构化内容控件：把内部段落扁平处理
         descendants(node, 'p').forEach((p) => handleParagraph(p))
       }
-      log.debug('docx 解析：局部节点降级处理')
-  } catch {
+    } catch {
       // 单节点失败只跳过
       paragraphCount++
     }

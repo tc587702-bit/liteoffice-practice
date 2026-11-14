@@ -1,9 +1,6 @@
 import { entryText, listByPrefix, unzip, type ZipArchive } from './zip'
-import { attr, childElements, descendants, firstChild, parseXml, parseXmlFromZip, type XmlNode } from './xml'
+import { attr, childElements, descendants, escapeXml, firstChild, parseXml, parseXmlFromZip, type XmlNode } from './xml'
 import type { Sheet, SheetCell, SheetJsModule, WorkBookLike } from 'sheetjs'
-import { createLogger } from './logger'
-
-const log = createLogger('xlsx')
 
 /* ------------------------------------------------------------------ */
 /* 类型                                                                 */
@@ -67,7 +64,7 @@ export const columnLabel = (index: number): string => {
   let label = ''
   while (n > 0) {
     const rem = (n - 1) % 26
-    label = String.fromCodePoint(65 + rem) + label
+    label = String.fromCharCode(65 + rem) + label
     n = Math.floor((n - 1) / 26)
   }
   return label
@@ -78,7 +75,7 @@ const columnIndex = (ref: string): number | null => {
   if (!match) return null
   const letters = match[1].toUpperCase()
   let n = 0
-  for (const ch of letters) n = n * 26 + ((ch.codePointAt(0) ?? 0) - 64)
+  for (const ch of letters) n = n * 26 + (ch.charCodeAt(0) - 64)
   return n - 1
 }
 
@@ -113,10 +110,11 @@ function workbookSheetOrder(archive: ZipArchive | null): { name: string; path: s
     const name = attr(sheet, 'name') ?? '未命名工作表'
     const rid = attr(sheet, 'id')
     const target = rid ? relMap.get(rid) : null
-    let path = ''
-    if (target) {
-      path = target.startsWith('/') ? target.slice(1) : `xl/${target.replace(/^\.\//, '')}`
-    }
+    const path = target
+      ? target.startsWith('/')
+        ? target.slice(1)
+        : `xl/${target.replace(/^\.\//, '')}`
+      : ''
     if (path) out.push({ name, path })
   })
   return out
@@ -150,7 +148,7 @@ function yieldToUi(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0))
 }
 
-async function parseSheetXml( // NOSONAR: 复杂度高，后续拆分
+async function parseSheetXml(
   xml: Document | null,
   shared: string[],
   options: RowWalkOptions = {},
@@ -168,7 +166,7 @@ async function parseSheetXml( // NOSONAR: 复杂度高，后续拆分
     if (index % ROW_CHUNK === 0) {
       options.signal?.throwIfAborted()
       options.onProgress?.(index, rowEls.length)
-      if (index > 0) await yieldToUi() // NOSONAR: 需顺序执行以保证进度与取消
+      if (index > 0) await yieldToUi()
     }
     const r = Number(attr(rowEl, 'r') ?? `${index + 1}`)
     index++
@@ -183,12 +181,7 @@ async function parseSheetXml( // NOSONAR: 复杂度高，后续拆分
       while (cells.length < target) cells.push('')
       try {
         cells[target] = cellValue(cell, shared)
-      } catch (error) {
-        // 单个单元格异常只影响该格：留 debug 痕迹，避免整表失败
-        log.debug('单元格解析失败，按空值处理', {
-          ref,
-          error: error instanceof Error ? error.message : String(error),
-        })
+      } catch {
         cells[target] = ''
       }
     })
@@ -238,7 +231,7 @@ export async function parseXlsxWithSheetJS(
     ? await XLSX.readAsync(buffer)
     : XLSX.read(buffer, { type: 'array' })
   const sheets: SheetData[] = []
-  wb.SheetNames.forEach((name) => { // NOSONAR: 复杂度高，后续拆分
+  wb.SheetNames.forEach((name) => {
     options.signal?.throwIfAborted()
     const sheet = wb.Sheets[name] as Sheet | undefined
     const rows: PersistedRow[] = []
@@ -246,12 +239,7 @@ export async function parseXlsxWithSheetJS(
     let range: { s: { r: number; c: number }; e: { r: number; c: number } } | null = null
     try {
       range = XLSX.utils.decode_range((sheet?.['!ref'] as string | undefined) ?? 'A1')
-    } catch (error) {
-      // !ref 缺失或损坏时退化为「按内容扫描」，属于可恢复情况
-      log.debug('工作表范围无法解析，按内容推断', {
-        sheet: name,
-        error: error instanceof Error ? error.message : String(error),
-      })
+    } catch {
       range = null
     }
     if (sheet && range) {
@@ -294,10 +282,6 @@ export async function parseXlsx(buffer: ArrayBuffer, options: XlsxParseOptions =
     return await parseXlsxWithSheetJS(buffer, options)
   } catch (error) {
     if ((error as Error)?.name === 'AbortError') throw error
-    log.warn('SheetJS 解析失败，回退内置解析器', {
-      bytes: buffer.byteLength,
-      error: error instanceof Error ? error.message : String(error),
-    })
     return parseXlsxFallback(buffer, ['已切换内置解析器读取工作簿'], options)
   }
 }
@@ -310,7 +294,7 @@ export async function inspectXlsxWorkbook(buffer: ArrayBuffer): Promise<XlsxInsp
     ? order
     : listByPrefix(archive, 'xl/worksheets/')
         .filter((name) => /^xl\/worksheets\/.*\.xml$/i.test(name))
-        .sort((a, b) => a.localeCompare(b))
+        .sort()
         .map((name, index) => ({ name: `工作表${index + 1}`, path: name }))
   let estimatedRows = 0
   let largestSheet = ''
@@ -345,7 +329,7 @@ export async function parseXlsxFallback(
   if (!order.length) {
     order = listByPrefix(archive, 'xl/worksheets/')
       .filter((name) => name.toLowerCase().endsWith('.xml'))
-      .sort((a, b) => a.localeCompare(b))
+      .sort()
       .map((name, index) => ({ name: `工作表${index + 1}`, path: name }))
   }
   const sheets: SheetData[] = []
@@ -355,8 +339,8 @@ export async function parseXlsxFallback(
     try {
       const raw = entryText(archive, entry.path) ?? ''
       options.onProgress?.({ done: index, total: order.length, sheet: `${entry.name} · 解析 XML`, rows: 0 })
-      await yieldToUi() // NOSONAR: 需顺序执行以保证进度与取消
-      const parsed = await parseSheetXml(parseXml(raw), shared, { // NOSONAR: 需顺序执行以保证进度与取消
+      await yieldToUi()
+      const parsed = await parseSheetXml(parseXml(raw), shared, {
         signal,
         onProgress: (done, total) => {
           options.onProgress?.({
@@ -378,12 +362,6 @@ export async function parseXlsxFallback(
       })
     } catch (error) {
       if ((error as Error)?.name === 'AbortError') throw error
-      // 单表失败不影响其他表：降级展示 + 记录是哪张表
-      log.warn('工作表解析失败，已降级', {
-        sheet: entry.name,
-        bytes: buffer.byteLength,
-        error: error instanceof Error ? error.message : String(error),
-      })
       warnings.push(`工作表「${entry.name}」部分内容无法解析，已展示可读部分`)
     }
   }
@@ -425,7 +403,7 @@ export function buildWorkbook(
       row.cells.forEach((cell, colIndex) => {
         target[colIndex] = cell
       })
-      for (let i = 0; i < target.length; i++) target[i] ??= ''
+      for (let i = 0; i < target.length; i++) if (target[i] === undefined) target[i] = ''
     })
     const ws = XLSX.utils.aoa_to_sheet(aoa)
     const width = sheet.rows.reduce((max, row) => Math.max(max, row.cells.length), 0)
@@ -458,7 +436,7 @@ export function findInSheets(sheets: PersistedSheet[], query: string) {
   sheets.forEach((sheet, sheetIndex) => {
     sheet.rows.forEach((row) => {
       row.cells.forEach((cell, col) => {
-        if (cell?.toLowerCase().includes(q)) {
+        if (cell && cell.toLowerCase().includes(q)) {
           hits.push({ sheet: sheetIndex, row: row.r, col, text: cell })
         }
       })
@@ -484,5 +462,4 @@ export function setCell(sheets: PersistedSheet[], sheetIndex: number, rowNumber:
   })
 }
 
-export { entryText }
-export { escapeXml } from './xml'
+export { entryText, escapeXml }

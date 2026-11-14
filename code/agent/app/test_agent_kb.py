@@ -9,6 +9,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 os.environ.setdefault("LITEOFFICE_KB_DB", str(ROOT / "data" / "kb.db"))
+# agent 内部的 kb_search 默认读 LITEOFFICE_KB_ID（缺省 "lab"，已迁空）；
+# 指到公文库，第 4/5/6 节走 run_agent 时才能查到安置房等语料。
+os.environ["LITEOFFICE_KB_ID"] = "gongwen"
 
 from app import kb
 from app.graph import run_agent
@@ -16,6 +19,9 @@ from app.tools import run_tool, tool_manifest
 
 FAILED = 0
 DOC = "<p>当前文档：一份关于安置房建设的汇报。</p>"
+# 公文语料已从历史遗留的 "lab" 迁到 "gongwen"（见 tools/migrate_genre_kb.py）；
+# 本自检查的是安置房等公文内容，必须指向 gongwen，否则查到空库。
+KB_ID = "gongwen"
 
 
 def check(name: str, ok: bool, detail: str = "") -> None:
@@ -26,7 +32,7 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 
 
 def main() -> int:
-    print(f"语料：{kb.kb_stats('lab')['documents']} 份 / {kb.kb_stats('lab')['chunks']} 块\n")
+    print(f"语料：{kb.kb_stats(KB_ID)['documents']} 份 / {kb.kb_stats(KB_ID)['chunks']} 块\n")
 
     print("=== 1) 工具已注册 ===")
     names = [t["name"] for t in tool_manifest()]
@@ -34,7 +40,7 @@ def main() -> int:
     check("清单里带描述", any(t["name"] == "kb_search" and t["description"] for t in tool_manifest()))
 
     print("\n=== 2) 直接调工具 ===")
-    r = run_tool("kb_search", DOC, {"query": "安置房建设进度"})
+    r = run_tool("kb_search", DOC, {"query": "安置房建设进度", "kbId": KB_ID})
     check("工具成功", r.ok is True, r.summary[:40])
     check("返回命中", len((r.data or {}).get("hits", [])) > 0, str(len((r.data or {}).get("hits", []))) + " 条")
     check("带出处", bool((r.data or {})["hits"][0]["doc"]), (r.data or {})["hits"][0]["doc"][:24])

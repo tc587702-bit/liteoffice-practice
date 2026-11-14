@@ -74,7 +74,7 @@
 </main>
 
 <script type="module">
-const token = location.pathname.split('/').findLast(Boolean)
+const token = location.pathname.split('/').filter(Boolean).pop()
 const $ = (id) => document.getElementById(id)
 
 function showError(title, desc) {
@@ -121,7 +121,7 @@ async function main() {
   } catch { /* WebSocket 不可用时仍可只读查看 */ }
 }
 
-await main()
+main()
 </script>
 </body>
 </html>

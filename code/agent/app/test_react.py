@@ -62,7 +62,9 @@ def main() -> int:
 
     print("\n=== 4) 没有明确意图：默认先检索 ===")
     r4 = run_agent(DOC, "这段话说了什么")
-    check("默认走了检索", r4["toolsUsed"] == ["search_document"], str(r4["toolsUsed"]))
+    # 语义：这类"指向某一段"的问法必须走检索（doc_search 或 search_document 都算），
+    # 不能落到 doc_section（那要求用户说出章节号）
+    check("默认走了检索", set(r4["toolsUsed"]) & {"search_document", "doc_search"} == set(r4["toolsUsed"]), str(r4["toolsUsed"]))
     check("仍然给出答案", bool(r4["answer"]), r4["answer"][:40])
 
     print("\n=== 5) 工具不重复调用 ===")

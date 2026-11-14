@@ -15,7 +15,6 @@
  * vite 起临时 dev server，把模块交给本机 headless Chromium 执行（无新增依赖）。
  */
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 
@@ -32,20 +31,6 @@ for (const file of [mdPath, xlsxPath, pdfPath, docxPath]) {
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
-
-/* ---------------- 运行地址（端口不写死，可用环境变量覆盖） ---------------- */
-/** 测试服务绑定的主机地址，默认仅本机 */
-const HOST = process.env.LITEOFFICE_TEST_HOST ?? '127.0.0.1'
-/** CDP 调试端口：0 表示由浏览器自动分配（从 DevToolsActivePort 读取真实端口） */
-const CDP_PORT = Number(process.env.CDP_PORT ?? 0) || 0
-
-/** 从 vite 实际监听地址取端口，避免 port: 0 时拼出 :0 */
-function resolveServerPort(server) {
-  const address = server.httpServer?.address?.()
-  if (address && typeof address === 'object' && address.port) return address.port
-  const configured = Number(server.config?.server?.port)
-  return Number.isFinite(configured) && configured > 0 ? configured : null
-}
 
 function findBrowser() {
   return [
@@ -65,14 +50,12 @@ function findBrowser() {
 async function launchDevServer() {
   const { createServer } = await import('vite')
   const server = await createServer({
-    server: { port: 0, strictPort: false, host: HOST },
+    server: { port: 0, strictPort: false, host: '127.0.0.1' },
     logLevel: 'silent',
     optimizeDeps: { noDiscovery: true },
   })
   await server.listen()
-  const urls = server.resolvedUrls?.local ?? []
-  const port = resolveServerPort(server)
-  return { server, url: urls[0] ?? `http://${HOST}:${port ?? '<port>'}/` }
+  return { server, url: server.resolvedUrls?.local?.[0] ?? 'http://127.0.0.1:5173/' }
 }
 
 async function launchBrowser(profile) {
@@ -80,7 +63,7 @@ async function launchBrowser(profile) {
   if (!executable) throw new Error('未找到 Chrome / Edge，可设置 CHROME_PATH')
   fs.rmSync(profile, { recursive: true, force: true, maxRetries: 3, retryDelay: 150 })
   fs.mkdirSync(profile, { recursive: true })
-  const port = CDP_PORT
+  const port = 9341
   const child = spawn(
     executable,
     [
@@ -96,37 +79,21 @@ async function launchBrowser(profile) {
     { stdio: 'ignore', detached: true },
   )
   child.unref()
-  // port 为 0 时浏览器会自动选端口，并把真实端口写进 profile/DevToolsActivePort
-  const readCdpPort = () => {
-    if (port > 0) return port
+  for (let i = 0; i < 150; i++) {
     try {
-      const [firstLine] = fs.readFileSync(path.join(profile, 'DevToolsActivePort'), 'utf8').split('\n')
-      const actual = Number(firstLine)
-      return Number.isFinite(actual) && actual > 0 ? actual : 0
+      const res = await fetch(`http://127.0.0.1:${port}/json/version`)
+      if (res.ok) return { port, browser: (await res.json()).Browser, child }
     } catch {
-      return 0
+      /* wait */
     }
-  }
-  const waitForCdp = async (attempts) => {
-    const actualPort = readCdpPort()
-    if (actualPort) {
-      try {
-        const res = await fetch(`http://${HOST}:${actualPort}/json/version`)
-        if (res.ok) return { port: actualPort, browser: (await res.json()).Browser, child }
-      } catch {
-        /* wait */
-      }
-    }
-    if (attempts <= 0) throw new Error('浏览器 CDP 未就绪')
     await sleep(200)
-    return waitForCdp(attempts - 1)
   }
-  return waitForCdp(150)
+  throw new Error('浏览器 CDP 未就绪')
 }
 
 async function openPage(port, url) {
   const target = await (
-    await fetch(`http://${HOST}:${port}/json/new?${encodeURIComponent(url)}`, { method: 'PUT' })
+    await fetch(`http://127.0.0.1:${port}/json/new?${encodeURIComponent(url)}`, { method: 'PUT' })
   ).json()
   const ws = new WebSocket(target.webSocketDebuggerUrl)
   await new Promise((resolve, reject) => {
@@ -165,13 +132,12 @@ const started = Date.now()
 let dev
 let browser
 let fixtureServer
-const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'lo-large-check-'))
+const profile = path.join(process.env.TMPDIR || process.cwd(), 'lo-large-check-profile')
 const results = []
 
 /**
- * 本脚本通过自动分配的本地端口提供 large-*.ext 测试文件，
- * 页面从 dev server 所在源跨端口取文件，因此这里放行 CORS。
- * 端口由系统分配（listen(0)），也可用 FIXTURE_ORIGIN 直接指定外部地址。
+ * 本脚本通过 http://127.0.0.1:8103/large-*.ext 取测试文件，
+ * 但原版没有启动这个服务，导致必然 404。这里补上。
  */
 async function launchFixtureServer(map) {
   const httpMod = await import('node:http')
@@ -194,22 +160,18 @@ async function launchFixtureServer(map) {
   })
   await new Promise((resolve, reject) => {
     server.once('error', reject)
-    server.listen(0, HOST, resolve)
+    server.listen(8103, '127.0.0.1', resolve)
   })
-  const address = server.address()
-  const port = address && typeof address === 'object' ? address.port : 0
-  return { server, origin: `http://${HOST}:${port}` }
+  return server
 }
 
 try {
-  const fixture = await launchFixtureServer({
+  fixtureServer = await launchFixtureServer({
     'large-8mb.md': mdPath,
     'large-50k.xlsx': xlsxPath,
     'large-500p.pdf': pdfPath,
     'large-20mb.docx': docxPath,
   })
-  fixtureServer = fixture.server
-  const fixtureOrigin = process.env.FIXTURE_ORIGIN ?? fixture.origin
   dev = await launchDevServer()
   browser = await launchBrowser(profile)
   const page = await openPage(browser.port, dev.url)
@@ -233,10 +195,13 @@ try {
     return out.result.value
   }
 
+  const base = JSON.stringify(dev.url)
+
   /* ---------- 1) md ---------- */
-  const mdResult = await runItem('md', `(async () => {
+  results.push(
+    await runItem('md', `(async () => {
       const t0 = performance.now()
-      const res = await fetch('${fixtureOrigin}/large-8mb.md')
+      const res = await fetch('http://127.0.0.1:8103/large-8mb.md')
       const buf = await res.arrayBuffer()
       const text = new TextDecoder('utf-8').decode(buf)
       const mod = await import('/src/lib/markdown.ts')
@@ -247,13 +212,14 @@ try {
       const mem = performance.memory ? performance.memory.usedJSHeapSize : 0
       return { item: 'md', bytes: buf.byteLength, blocks, hasMark, ms: Math.round(performance.now() - t0), peakMB: Math.round((mem / 1048576) * 10) / 10,
         pass: blocks >= 120000 && hasMark }
-    })()`)
-  results.push(mdResult)
+    })()`),
+  )
 
   /* ---------- 2) xlsx ---------- */
-  const xlsxResult = await runItem('xlsx', `(async () => {
+  results.push(
+    await runItem('xlsx', `(async () => {
       const t0 = performance.now()
-      const buf = await (await fetch('${fixtureOrigin}/large-50k.xlsx')).arrayBuffer()
+      const buf = await (await fetch('http://127.0.0.1:8103/large-50k.xlsx')).arrayBuffer()
       const mod = await import('/src/lib/xlsx.ts')
       const parsed = await mod.parseXlsxWithSheetJS(buf)
       const sheet = parsed.sheets[0]
@@ -264,26 +230,28 @@ try {
       return { item: 'xlsx', bytes: buf.byteLength, rows: sheet.rows.length, lastCell, warnings: warningText,
         ms: Math.round(performance.now() - t0), peakMB: Math.round((mem / 1048576) * 10) / 10,
         pass: sheet.rows.length === 50000 && lastCell === 'LAST-ROW-MARK-7C1B' && !warningText.includes('截断') }
-    })()`)
-  results.push(xlsxResult)
+    })()`),
+  )
 
   /* ---------- 3) pdf ---------- */
-  const pdfResult = await runItem('pdf', `(async () => {
+  results.push(
+    await runItem('pdf', `(async () => {
       const t0 = performance.now()
-      const buf = await (await fetch('${fixtureOrigin}/large-500p.pdf')).arrayBuffer()
+      const buf = await (await fetch('http://127.0.0.1:8103/large-500p.pdf')).arrayBuffer()
       const mod = await import('/src/lib/pdf.ts')
       const res = await mod.extractPdfText(buf)
       const mem = performance.memory ? performance.memory.usedJSHeapSize : 0
       return { item: 'pdf', bytes: buf.byteLength, pages: res.pageCount, hasMark: (res.text || '').includes('LAST-PAGE-MARK-2D8E'),
         chars: res.charCount, ms: Math.round(performance.now() - t0), peakMB: Math.round((mem / 1048576) * 10) / 10,
         pass: res.pageCount === 500 && (res.text || '').includes('LAST-PAGE-MARK-2D8E') }
-    })()`)
-  results.push(pdfResult)
+    })()`),
+  )
 
   /* ---------- 4) docx ---------- */
-  const docxResult = await runItem('docx', `(async () => {
+  results.push(
+    await runItem('docx', `(async () => {
       const t0 = performance.now()
-      const buf = await (await fetch('${fixtureOrigin}/large-20mb.docx')).arrayBuffer()
+      const buf = await (await fetch('http://127.0.0.1:8103/large-20mb.docx')).arrayBuffer()
       const mod = await import('/src/lib/docx.ts')
       const parsed = await mod.parseDocx(buf)
       const mem = performance.memory ? performance.memory.usedJSHeapSize : 0
@@ -291,8 +259,8 @@ try {
         hasMark: parsed.html.includes('END-OF-DOCX-MARK-6B2C'), ms: Math.round(performance.now() - t0),
         peakMB: Math.round((mem / 1048576) * 10) / 10,
         pass: parsed.images.length === 50 && parsed.paragraphCount >= 2000 && parsed.html.includes('END-OF-DOCX-MARK-6B2C') }
-    })()`)
-  results.push(docxResult)
+    })()`),
+  )
 
   page.close()
 } catch (error) {
@@ -313,15 +281,15 @@ if (results.length) {
   console.log(`运行环境: ${browser?.browser ?? 'unknown'}（无截断自检）`)
   console.log('')
   const label = { md: 'md   8 MB / 12 万段', xlsx: 'xlsx 5 万行 × 20 列', pdf: 'pdf  500 页', docx: 'docx 20 MB / 50 图' }
-  const detailOf = (row) => {
-    if (row.error) return `ERROR: ${row.error}`
-    if (row.item === 'md') return `blocks=${row.blocks} mark=${row.hasMark}`
-    if (row.item === 'xlsx') return `rows=${row.rows} last="${row.lastCell}"`
-    if (row.item === 'pdf') return `pages=${row.pages} chars=${row.chars} mark=${row.hasMark}`
-    return `images=${row.images} paragraphs=${row.paragraphs} mark=${row.hasMark}`
-  }
   for (const row of results) {
-    const detail = detailOf(row)
+    const detail = row.error ? `ERROR: ${row.error}` :
+      row.item === 'md'
+        ? `blocks=${row.blocks} mark=${row.hasMark}`
+        : row.item === 'xlsx'
+          ? `rows=${row.rows} last="${row.lastCell}"`
+          : row.item === 'pdf'
+            ? `pages=${row.pages} chars=${row.chars} mark=${row.hasMark}`
+            : `images=${row.images} paragraphs=${row.paragraphs} mark=${row.hasMark}`
     console.log(
       `${label[row.item].padEnd(22)} 耗时=${String(row.ms).padStart(6)}ms  峰值堆≈${String(row.peakMB).padStart(7)}MB  ${detail}  ${row.pass ? 'PASS' : 'FAIL'}`,
     )

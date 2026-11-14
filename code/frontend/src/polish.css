@@ -1,0 +1,149 @@
+
+/* ================================================================== */
+/* 视觉精修层（v2）：统一圆角/阴影/边框/字重，提升高级感                */
+/* 只加样式，不动结构；所有选择器都基于已有类名，避免与组件耦合          */
+/* ================================================================== */
+
+:root {
+  /* 一套更收敛的层级：越小越"硬"，越大越"软" */
+  --lo-r-sm: 8px;
+  --lo-r-md: 12px;
+  --lo-r-lg: 16px;
+  --lo-r-xl: 20px;
+  --lo-hairline: rgba(255, 255, 255, 0.075);
+  --lo-hairline-strong: rgba(255, 255, 255, 0.12);
+  /* 细腻的多层阴影：大范围柔和 + 贴近元素的一圈描边感 */
+  --lo-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.35), 0 8px 24px -12px rgba(0, 0, 0, 0.65);
+  --lo-shadow-2: 0 2px 4px rgba(0, 0, 0, 0.4), 0 18px 48px -24px rgba(0, 0, 0, 0.8);
+  --lo-shadow-paper: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 30px 80px -40px rgba(0, 0, 0, 0.95),
+    0 2px 8px rgba(0, 0, 0, 0.5);
+  --lo-ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+/* ---------- 环境光：两束极淡的光，替代原来的径向渐变 ---------- */
+.lo-ambient {
+  background-image:
+    radial-gradient(1200px 600px at 12% -10%, rgba(10, 132, 255, 0.10), transparent 60%),
+    radial-gradient(900px 500px at 88% 110%, rgba(94, 92, 230, 0.08), transparent 62%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.012), transparent 40%);
+}
+
+/* ---------- 玻璃面板：更薄的白边 + 顶部高光 ---------- */
+.lo-glass {
+  background-color: var(--lo-glass);
+  backdrop-filter: var(--lo-glass-blur);
+  -webkit-backdrop-filter: var(--lo-glass-blur);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+/* ---------- 文档纸面：页边高光 + 柔和投影 ---------- */
+.lo-paper-surface {
+  box-shadow: var(--lo-shadow-paper);
+  border: 1px solid var(--lo-hairline);
+}
+
+/* ---------- 正文排版：行距与字距更松一点，长文更好读 ---------- */
+.lo-editor {
+  letter-spacing: 0.012em;
+  line-height: 1.9;
+  text-wrap: pretty;
+}
+.lo-editor h1,
+.lo-editor h2,
+.lo-editor h3 {
+  letter-spacing: -0.01em;
+}
+.lo-editor p {
+  margin: 0 0 0.72em;
+}
+.lo-editor p:last-child {
+  margin-bottom: 0;
+}
+.lo-editor ::selection {
+  background: rgba(10, 132, 255, 0.35);
+}
+
+/* ---------- 按钮：统一圆角 + 悬停微抬起 ---------- */
+.lo-press {
+  border-radius: var(--lo-r-md);
+  transition:
+    transform 160ms var(--lo-ease),
+    box-shadow 160ms var(--lo-ease),
+    background-color 160ms var(--lo-ease),
+    border-color 160ms var(--lo-ease);
+  will-change: transform;
+}
+.lo-press:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: var(--lo-shadow-1);
+}
+.lo-press:active:not(:disabled) {
+  transform: translateY(0) scale(0.985);
+}
+
+/* ---------- 键盘焦点：统一蓝色描边，不改变布局 ---------- */
+:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.55);
+  border-radius: var(--lo-r-sm);
+}
+
+/* ---------- 滚动条：更细、圆角、悬停才显色 ---------- */
+.thin-scroll::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.thin-scroll::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.10);
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: 999px;
+  transition: background-color 160ms var(--lo-ease);
+}
+.thin-scroll:hover::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.2);
+}
+
+/* ---------- 侧栏里的建议卡片：淡淡的渐变 + 内高光 ---------- */
+.issue-card {
+  border-color: var(--lo-hairline);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.032), rgba(255, 255, 255, 0.012));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.045);
+  transition:
+    border-color 160ms var(--lo-ease),
+    transform 160ms var(--lo-ease);
+}
+.issue-card:hover {
+  border-color: var(--lo-hairline-strong);
+}
+
+/* ---------- 输入框：去掉厚描边，聚焦时只亮一条底边 ---------- */
+.lo-input {
+  border-radius: var(--lo-r-md);
+  transition:
+    border-color 160ms var(--lo-ease),
+    background-color 160ms var(--lo-ease);
+}
+.lo-input:focus {
+  border-color: rgba(10, 132, 255, 0.5);
+  background-color: rgba(255, 255, 255, 0.04);
+}
+
+/* ---------- 数字统一等宽，表格类信息更齐 ---------- */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+}
+
+/* ---------- 暗色纸面上，正文里的引用与标记更清晰 ---------- */
+.lo-paper-dark .lo-editor ::selection {
+  background: rgba(10, 132, 255, 0.45);
+}
+.lo-paper-dark .lo-issue-mark {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+}
+
+/* ---------- 顶部工具条分组之间加一条发丝线 ---------- */
+.lo-hairline-right {
+  box-shadow: inset -1px 0 0 var(--lo-hairline);
+}

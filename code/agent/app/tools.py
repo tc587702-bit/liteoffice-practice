@@ -315,14 +315,14 @@ def diagnose_report(html: str) -> ToolResult:
 # ---------------- 知识库检索（RAG 工具） ----------------
 
 def kb_search(html: str, query: str = "", kbId: str = "lab", top: int = 3, **_: Any) -> ToolResult:
-    """在共享知识库里检索（与 /v1/kb/*/search 同一套逻辑，不重复实现）"""
-    from . import kb as _kb
-
+    """在共享知识库里检索（与 /v1/kb/*/qa 同一条链路：BM25 + 向量加权混合）"""
     q = (query or "").strip()
     if not q:
         return ToolResult(False, "kb_search", "缺少检索词", {})
     try:
-        hits = _kb.search(kbId, q, top_k=int(top))
+        from .pipelines import retrieve as _retrieve
+
+        hits, _ = _retrieve(kbId, q, top_k=int(top))
     except Exception as exc:  # noqa: BLE001 边界兜底，异常转为可读提示
         return ToolResult(False, "kb_search", f"知识库不可用：{exc}", {})
     if not hits:
@@ -371,7 +371,7 @@ def doc_section(html: str, key: str = "", **_: Any) -> ToolResult:
     if not sec:
         return ToolResult(False, "doc_section", f"找不到章节「{key}」", {})
     text = sec.text or "（该章节没有正文）"
-    head = f"第 {sec.index} 节 {sec.title}"
+    head = f"{sec.title}"
     return ToolResult(
         True,
         "doc_section",

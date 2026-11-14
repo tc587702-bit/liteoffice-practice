@@ -3,9 +3,6 @@ import { buildWorkbook } from './xlsx'
 import { hasZipHeader } from './zip'
 import { htmlToMarkdown, htmlToPlainText } from './markdown'
 import type { DocRecord } from './db'
-import { createLogger } from './logger'
-
-const log = createLogger('export')
 
 export interface ExportResult {
   ok: boolean
@@ -63,13 +60,11 @@ export async function exportDocx(doc: DocRecord): Promise<ExportResult> {
   try {
     bytes = buildDocx(html, baseName(doc.name))
   } catch (error) {
-    log.error('生成 DOCX 失败', error, { docId: doc.id, htmlChars: html.length })
     return { ok: false, message: `生成 DOCX 失败：${(error as Error).message}` }
   }
 
   // 自检 1：ZIP 头必须为 PK\x03\x04
   if (!hasZipHeader(bytes)) {
-    log.error('DOCX 自检失败：文件头不合法', null, { docId: doc.id, bytes: bytes.length })
     return { ok: false, message: '导出自检失败：文件头不是 PK\x03\x04，已中止下载' }
   }
 
@@ -118,8 +113,6 @@ export async function exportDocx(doc: DocRecord): Promise<ExportResult> {
       details: [`回读段落数：${actualParagraphs}`, `回读首段：${firstExpected.slice(0, 40)}`],
     }
   } catch (error) {
-    // 回读自检抛错说明「写出去的文件自己都读不回来」，属于严重问题
-    log.error('DOCX 回读自检异常', error, { docId: doc.id, bytes: bytes.length })
     return { ok: false, message: `导出自检失败：${(error as Error).message}` }
   }
 }
@@ -139,7 +132,6 @@ export async function exportXlsx(doc: DocRecord): Promise<ExportResult> {
     const buffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' })
     const bytes = new Uint8Array(buffer)
     if (!hasZipHeader(bytes)) {
-      log.error('XLSX 自检失败：文件头不合法', null, { docId: doc.id, bytes: bytes.length })
       return { ok: false, message: '导出自检失败：XLSX 文件头不是 PK（0x50 0x4B），已中止下载' }
     }
     // 回读自检：优先走异步读取入口（浏览器无法同步解压 deflate）
@@ -148,7 +140,6 @@ export async function exportXlsx(doc: DocRecord): Promise<ExportResult> {
       : XLSX.read(buffer, { type: 'array' })
     const missing = doc.sheets.map((s) => s.name).filter((name) => !verify.SheetNames.includes(name))
     if (missing.length) {
-      log.error('XLSX 自检失败：回读缺少工作表', null, { docId: doc.id, missing, expected: doc.sheets.length })
       return { ok: false, message: `导出自检失败：回读缺少工作表 ${missing.join('、')}，已中止下载` }
     }
     const filename = `${baseName(doc.name)}.xlsx`
@@ -164,7 +155,6 @@ export async function exportXlsx(doc: DocRecord): Promise<ExportResult> {
       details: [`工作表：${verify.SheetNames.join('、')}`],
     }
   } catch (error) {
-    log.error('XLSX 回写失败', error, { docId: doc.id, sheets: doc.sheets?.length ?? 0 })
     return { ok: false, message: `XLSX 回写失败：${(error as Error).message}` }
   }
 }
@@ -203,7 +193,7 @@ export function downloadOriginal(doc: DocRecord) {
   return { ok: true, message: `已下载原始文件 ${doc.name}` }
 }
 
-async function runExport(doc: DocRecord): Promise<ExportResult> {
+export async function exportDocument(doc: DocRecord): Promise<ExportResult> {
   if (doc.kind === 'md') return exportMarkdown(doc)
   if (doc.kind === 'docx') return exportDocx(doc)
   if (doc.kind === 'xlsx') return exportXlsx(doc)
@@ -214,17 +204,4 @@ async function runExport(doc: DocRecord): Promise<ExportResult> {
     }
   }
   return exportMarkdown(doc)
-}
-
-export async function exportDocument(doc: DocRecord): Promise<ExportResult> {
-  const done = log.time('导出文档')
-  try {
-    const result = await runExport(doc)
-    done({ kind: doc.kind, ok: result.ok })
-    return result
-  } catch (error) {
-    // 兜底：各导出函数内部已有 try/catch，走到这里说明有未预期分支
-    log.error('导出流程出现未预期异常', error, { kind: doc.kind, docId: doc.id })
-    return { ok: false, message: `导出失败：${(error as Error).message}` }
-  }
 }

@@ -10,6 +10,7 @@ import AppButton from '../components/ui/AppButton.vue'
 import AppIcon from '../components/ui/AppIcon.vue'
 import { useFileDrop } from '../components/app/fileDropContext'
 import { outlineFromHtml, useWorkspaceStore } from '../stores/workspace'
+import { aiPanelOpen } from '../lib/aiPanelState'
 
 /** 富文本编辑区的可访问性属性（contenteditable 只能是 div，用绑定避免静态 role 告警） */
 const editorA11y = { role: 'textbox', 'aria-multiline': 'true' } as const
@@ -23,9 +24,6 @@ function elementOf(node: Node | null | undefined): HTMLElement | null {
 import { formatSize, KIND_EXT } from '../lib/file'
 import { downloadOriginal, exportDocument, exportTextCopy } from '../lib/exporter'
 import { escapeHtml, htmlToPlainText } from '../lib/markdown'
-import { createLogger } from '../lib/logger'
-
-const log = createLogger('editor')
 
 /* 大纲层级缩进：全部用静态类名，避免在模板里写内联 style 做布局 */
 const OUTLINE_INDENT = ['pl-[8px]', 'pl-[20px]', 'pl-[32px]', 'pl-[44px]', 'pl-[56px]', 'pl-[68px]']
@@ -66,6 +64,30 @@ const redoDepth = ref(0)
 const reading = ref(false)
 const saving = ref(false)
 const outlineOpen = ref(true)
+
+/** 纸面色调：白 / 米 / 暗。纯白长时间看刺眼，浅色指针也会"消失" */
+type PaperTone = 'white' | 'soft' | 'dark'
+const PAPER_TONES: { id: PaperTone; label: string }[] = [
+  { id: 'white', label: '白' },
+  { id: 'soft', label: '米' },
+  { id: 'dark', label: '暗' },
+]
+const paperTone = ref<PaperTone>((localStorage.getItem('lo.paperTone') as PaperTone) || 'dark')
+const paperClass = computed(() => {
+  if (paperTone.value === 'soft') return 'lo-paper-surface lo-paper-soft'
+  if (paperTone.value === 'dark') return 'lo-paper-surface lo-paper-dark'
+  return 'lo-paper-surface'
+})
+function cyclePaperTone() {
+  const order: PaperTone[] = ['dark', 'soft', 'white']
+  const next = order[(order.indexOf(paperTone.value) + 1) % order.length]
+  paperTone.value = next
+  localStorage.setItem('lo.paperTone', next)
+}
+// AI 侧栏打开时自动收起大纲：两边各占 248 + 360，正文会被挤得太窄
+watch(aiPanelOpen, (open) => {
+  if (open) outlineOpen.value = false
+})
 const filter = ref('')
 const unsafeBlocked = ref(false)
 
@@ -226,12 +248,7 @@ function refreshMarks() {
   const block = (format: string) => {
     try {
       return document.queryCommandState(format)
-    } catch (error) {
-      // 某些浏览器/选区下 queryCommandState 会抛错，工具栏应保持「未激活」而不是崩溃
-      log.debug('查询选区格式状态失败', {
-        format,
-        error: error instanceof Error ? error.message : String(error),
-      })
+    } catch {
       return false
     }
   }
@@ -299,6 +316,37 @@ function applyHtml(nextHtml: string) {
   persistNow(nextHtml, nextHtml !== (doc.value?.originalHtml ?? ''))
 }
 
+/**
+ * 编辑器键盘快捷键：Ctrl/Cmd+Z 撤销，Ctrl/Cmd+Shift+Z（或 Ctrl+Y）重做。
+ * 走自家的 historyStack，而不是浏览器原生撤销——否则 AI 一键替换这类
+ * 程序化改动，原生撤销栈和我们的快照会对不上。
+ */
+function onEditorKeydown(event: KeyboardEvent) {
+  const mod = event.ctrlKey || event.metaKey
+  if (!mod) return
+  const key = event.key.toLowerCase()
+  if (key === 'z' && !event.shiftKey) {
+    event.preventDefault()
+    onCommand('undo')
+  } else if ((key === 'z' && event.shiftKey) || key === 'y') {
+    event.preventDefault()
+    onCommand('redo')
+  }
+}
+
+/**
+ * 点正文里的问题标记 → 通知右侧面板高亮对应建议（双向跳转）。
+ * 标记上带 data-issue-badge，值就是建议序号。
+ */
+function onEditorClick(event: MouseEvent) {
+  const target = event.target as HTMLElement | null
+  const mark = target?.closest('.lo-issue-mark') as HTMLElement | null
+  if (!mark) return
+  const badge = mark.getAttribute('data-issue-badge')
+  if (!badge) return
+  window.dispatchEvent(new CustomEvent('lo:issue-focus', { detail: { badge: Number(badge) } }))
+}
+
 function onCommand(command: string) {
   if (!doc.value) return
   if (command === 'undo') {
@@ -361,12 +409,7 @@ function onCommand(command: string) {
       default:
         return
     }
-  } catch (error) {
-    // execCommand 在空选区/不可编辑区域会抛错，属于用户可理解的失败，记 warn 便于统计
-    log.warn('富文本命令执行失败', {
-      command,
-      error: error instanceof Error ? error.message : String(error),
-    })
+  } catch {
     store.addToast({ title: '该操作在当前选区不可用', tone: 'warning' })
     return
   }
@@ -551,6 +594,15 @@ const isBinaryText = computed(() => doc.value?.kind === 'pptx' || doc.value?.kin
                 <AppIcon name="columns-3" class="h-3.5 w-3.5" />
                 大纲
               </AppButton>
+              <AppButton
+                size="sm"
+                variant="secondary"
+                :title="`纸面色调：${PAPER_TONES.find((t) => t.id === paperTone)?.label}（点击切换 白/米/暗）`"
+                @click="cyclePaperTone()"
+              >
+                <AppIcon name="file-text" class="h-3.5 w-3.5" />
+                {{ PAPER_TONES.find((t) => t.id === paperTone)?.label }}
+              </AppButton>
               <AppButton size="sm" variant="secondary" :disabled="saving" @click="handleSave">
                 <AppIcon name="save" class="h-3.5 w-3.5" />
                 保存下载
@@ -630,7 +682,7 @@ const isBinaryText = computed(() => doc.value?.kind === 'pptx' || doc.value?.kin
               >
                 <PdfPages v-if="doc.kind === 'pdf'" :key="doc.id" :doc="doc" />
                 <div class="mx-auto max-w-[860px]">
-                  <div class="rounded-[20px] bg-white shadow-[0_24px_60px_-30px_rgba(0,0,0,0.9)]">
+                  <div class="rounded-[20px] shadow-[0_24px_60px_-30px_rgba(0,0,0,0.9)]" :class="paperClass">
                     <div
                       class="flex items-center justify-between gap-3 border-b border-[#EDEDF0] px-8 py-3 text-[11px] text-[#98989D]"
                     >
@@ -653,6 +705,8 @@ const isBinaryText = computed(() => doc.value?.kind === 'pptx' || doc.value?.kin
                       class="lo-editor lo-word-wrap min-h-[520px] px-8 py-7 outline-none"
                       :class="reading ? 'cursor-default select-text' : ''"
                       @input="onInput"
+                      @keydown="onEditorKeydown"
+                      @click="onEditorClick"
                       @paste="onPaste"
                       @keyup="refreshMarks"
                       @mouseup="refreshMarks"
@@ -685,7 +739,17 @@ const isBinaryText = computed(() => doc.value?.kind === 'pptx' || doc.value?.kin
               <div class="border-b border-white/[0.06] px-4 py-3">
                 <div class="flex items-center justify-between">
                   <span class="text-[12px] font-medium text-[#F5F5F7]">文档大纲</span>
-                  <span class="text-[11px] tabular-nums text-[#636366]">{{ outline.length }}</span>
+                  <div class="flex items-center gap-1.5">
+                    <span class="text-[11px] tabular-nums text-[#636366]">{{ outline.length }}</span>
+                    <button
+                      type="button"
+                      aria-label="收起大纲"
+                      class="rounded-md p-0.5 text-[#636366] transition-colors hover:text-[#F5F5F7]"
+                      @click="outlineOpen = false"
+                    >
+                      <AppIcon name="x" class="h-3.5 w-3.5" />
+                    </button>
+                  </div>
                 </div>
                 <label for="outline-filter" class="sr-only">筛选标题</label>
                 <input

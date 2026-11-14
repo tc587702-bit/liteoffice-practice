@@ -1,9 +1,6 @@
 import type { DocxItem } from './docx'
 import type { PersistedSheet } from './xlsx'
 import type { FileKind, PptSlide } from './file'
-import { createLogger } from './logger'
-
-const log = createLogger('db')
 
 const DB_NAME = 'liteoffice'
 const DB_VERSION = 1
@@ -63,17 +60,14 @@ function openDB(): Promise<IDBDatabase | null> {
   dbPromise = new Promise((resolve) => {
     if (typeof indexedDB === 'undefined') {
       degraded = true
-      // 隐私模式 / 老浏览器：功能降级但不能静默，用户需要知道「关掉就没了」
-      log.warn('当前环境不支持 IndexedDB，本地持久化已停用')
       resolve(null)
       return
     }
     let request: IDBOpenDBRequest
     try {
       request = indexedDB.open(DB_NAME, DB_VERSION)
-    } catch (error) {
+    } catch {
       degraded = true
-      log.error('打开 IndexedDB 失败，转为内存模式', error, { name: DB_NAME, version: DB_VERSION })
       resolve(null)
       return
     }
@@ -82,19 +76,13 @@ function openDB(): Promise<IDBDatabase | null> {
       if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE, { keyPath: 'id' })
       if (!db.objectStoreNames.contains('meta')) db.createObjectStore('meta', { keyPath: 'key' })
     }
-    request.onsuccess = () => {
-      log.debug('IndexedDB 已就绪', { name: DB_NAME, version: DB_VERSION })
-      resolve(request.result)
-    }
+    request.onsuccess = () => resolve(request.result)
     request.onerror = () => {
       degraded = true
-      log.error('IndexedDB 打开出错', request.error, { name: DB_NAME })
       resolve(null)
     }
     request.onblocked = () => {
-      // 多标签页同时升级时会阻塞：提示用户关闭其他标签页
       degraded = true
-      log.warn('IndexedDB 被其他标签页阻塞，本次使用内存模式')
       resolve(null)
     }
   })
@@ -128,9 +116,8 @@ export async function loadAll(): Promise<{ docs: DocRecord[]; session: SessionSt
       sessionReq.onerror = () => resolve(null)
     })
     return { docs, session, ok: true }
-  } catch (error) {
+  } catch {
     degraded = true
-    log.error('读取本地文档失败，转为空会话', error)
     return { docs: [], session: null, ok: false }
   }
 }
@@ -147,11 +134,8 @@ export async function saveDoc(doc: DocRecord): Promise<{ ok: boolean; reason?: s
     degraded = true
     const name = (error as { name?: string })?.name ?? ''
     if (name === 'QuotaExceededError') {
-      // 配额不足是可预期的（大文件 + 原文件字节），warn 足够；但要带上估算占用
-      log.warn('本地存储空间不足，写入被拒绝', { docId: doc.id, size: doc.size, name: doc.name })
       return { ok: false, reason: '本地存储空间不足，本次内容未能写入 IndexedDB（页面内仍可继续编辑）' }
     }
-    log.error('写入 IndexedDB 失败，已降级', error, { docId: doc.id, size: doc.size })
     return { ok: false, reason: '内容未能写入 IndexedDB，已降级为仅本页内保存' }
   }
 }
@@ -163,9 +147,8 @@ export async function deleteDoc(id: string): Promise<void> {
     const tx = db.transaction(STORE, 'readwrite')
     tx.objectStore(STORE).delete(id)
     await done(tx)
-  } catch (error) {
+  } catch {
     degraded = true
-    log.warn('删除本地文档失败', { docId: id, error: error instanceof Error ? error.message : String(error) })
   }
 }
 
@@ -177,9 +160,8 @@ export async function saveSession(session: SessionState): Promise<boolean> {
     tx.objectStore('meta').put({ key: 'session', value: session })
     await done(tx)
     return true
-  } catch (error) {
+  } catch {
     degraded = true
-    log.warn('保存会话状态失败', { docs: session.ids.length, error: error instanceof Error ? error.message : String(error) })
     return false
   }
 }
@@ -192,9 +174,8 @@ export async function clearAll(): Promise<void> {
     tx.objectStore(STORE).clear()
     tx.objectStore('meta').clear()
     await done(tx)
-  } catch (error) {
+  } catch {
     degraded = true
-    log.warn('清空本地数据失败', { error: error instanceof Error ? error.message : String(error) })
   }
 }
 

@@ -17,66 +17,33 @@ from __future__ import annotations
 
 import os
 import time
-import uuid
 from collections import defaultdict
-from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI, Header, Request
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from . import feedback as FEEDBACK
 from . import improve as IMPROVE
+from . import review as REVIEW
+from . import review_local as REVIEW_LOCAL
 from . import kb as KB
 from . import pipelines as PIPE
 from .graph import run_agent
 from .llm import complete
 from .llm import info as llm_info
 from .tools import run_tool, tool_manifest
-from .errors import AppError, BadRequest, RateLimited, Unauthorized
-from .error_handlers import install_error_handlers
-from . import logging_conf
-from .logging_conf import get_logger, request_id_ctx, setup_logging
 
 API_TOKEN = os.getenv("LITEOFFICE_API_TOKEN", "")
 RATE_LIMIT = int(os.getenv("LITEOFFICE_RATE_LIMIT", "60"))
 WINDOW = 60.0
 
-setup_logging()
-log = get_logger("main")
-
-
-@asynccontextmanager
-async def lifespan(_: FastAPI):
-    """启动/关闭只做「可观测」的事：打印配置、预热知识库、记录退出。"""
-    log.info(
-        "Agent 服务启动",
-        version="0.1.0",
-        rateLimit=RATE_LIMIT,
-        authEnabled=bool(API_TOKEN),
-        adminAuthEnabled=bool(os.getenv("LITEOFFICE_ADMIN_TOKEN", "")),
-        llm=llm_info(),
-        logFile=str(logging_conf.LOG_FILE) if logging_conf.LOG_FILE else "-",
-    )
-    try:
-        stats = KB.kb_stats(os.getenv("LITEOFFICE_KB_ID", "kb_shared"))
-        log.info("知识库就绪", stats=stats)
-    except Exception:
-        # 知识库不可用不应阻止聊天/工具类接口启动，但必须记录
-        log.exception("知识库初始化检查失败")
-    yield
-    log.info("Agent 服务关闭")
-
-
 app = FastAPI(
     title="LiteOffice Agent API",
     version="0.1.0",
     description="按「AI Agent 技术栈」图实现：FastAPI（API 层）+ LangGraph（Agent 层）+ LiteLLM（模型层）",
-    lifespan=lifespan,
 )
-
-install_error_handlers(app)
 
 app.add_middleware(
     CORSMiddleware,
@@ -90,14 +57,14 @@ _hits: dict[str, list[float]] = defaultdict(list)
 
 def _check_token(token: str | None) -> None:
     if API_TOKEN and token != API_TOKEN:
-        raise Unauthorized("缺少或错误的 X-API-Token", code="BAD_API_TOKEN")
+        raise HTTPException(status_code=401, detail="缺少或错误的 X-API-Token")
 
 
 def _rate_limit(ip: str) -> None:
     now = time.time()
     bucket = [t for t in _hits[ip] if now - t < WINDOW]
     if len(bucket) >= RATE_LIMIT:
-        raise RateLimited(f"请求过于频繁（每分钟上限 {RATE_LIMIT} 次）")
+        raise HTTPException(status_code=429, detail=f"请求过于频繁（每分钟上限 {RATE_LIMIT} 次）")
     bucket.append(now)
     _hits[ip] = bucket
 
@@ -115,52 +82,16 @@ class ChatPayload(BaseModel):
 
 
 @app.middleware("http")
-async def request_context(request: Request, call_next):
-    """
-    请求级横切：分配 requestId → 限流 → 计时 → 访问日志 → 兜底异常。
+async def guard(request: Request, call_next):
+    if request.url.path.startswith("/v1") and request.url.path != "/v1/llm/info":
+        ip = (request.client.host if request.client else "unknown") or "unknown"
+        try:
+            _rate_limit(ip)
+        except HTTPException as exc:
+            from fastapi.responses import JSONResponse
 
-    注意：中间件里抛出的异常不会被 FastAPI 的 exception_handler 捕获，
-    因此这里的兜底是必须的，否则会变成无日志的 500 或直接断开连接。
-    """
-    rid = (request.headers.get("x-request-id") or uuid.uuid4().hex)[:64]
-    token = request_id_ctx.set(rid)
-    started = time.perf_counter()
-    req_log = log.child(path=request.url.path, method=request.method)
-    try:
-        if request.url.path.startswith("/v1") and request.url.path != "/v1/llm/info":
-            ip = (request.client.host if request.client else "unknown") or "unknown"
-            try:
-                _rate_limit(ip)
-            except AppError as exc:
-                req_log.warning("触发限流", ip=ip, code=exc.code, limit=RATE_LIMIT)
-                return JSONResponse(
-                    {"detail": exc.message, "code": exc.code, "requestId": rid},
-                    status_code=exc.status_code,
-                    headers={"X-Request-Id": rid},
-                )
-
-        response = await call_next(request)
-        response.headers["X-Request-Id"] = rid
-        req_log.info(
-            "请求完成",
-            status=response.status_code,
-            durationMs=round((time.perf_counter() - started) * 1000, 1),
-        )
-        return response
-    except Exception as exc:  # noqa: BLE001 —— 这里就是要兜住所有异常
-        req_log.exception(
-            "请求处理异常（中间件层兜底）",
-            errorType=type(exc).__name__,
-            error=str(exc),
-            durationMs=round((time.perf_counter() - started) * 1000, 1),
-        )
-        return JSONResponse(
-            {"detail": "服务器内部错误", "code": "INTERNAL", "requestId": rid},
-            status_code=500,
-            headers={"X-Request-Id": rid},
-        )
-    finally:
-        request_id_ctx.reset(token)
+            return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
+    return await call_next(request)
 
 
 # ---------------- 会话级跨轮记忆（只存内存，不落盘） ----------------
@@ -200,22 +131,13 @@ def health() -> dict[str, Any]:
 
 @app.get("/v1/tools")
 def tools() -> dict[str, Any]:
-    manifest = tool_manifest()
-    return {"tools": manifest, "count": len(manifest)}
+    return {"tools": tool_manifest(), "count": len(tool_manifest())}
 
 
 @app.post("/v1/tools/{name}")
 def call_tool(name: str, payload: DocPayload, x_api_token: str | None = Header(default=None)) -> dict[str, Any]:
     _check_token(x_api_token)
-    started = time.perf_counter()
-    log.info("直接调用工具", tool=name, htmlChars=len(payload.html), hasQuery=bool(payload.query))
     result = run_tool(name, payload.html, {"query": payload.query} if payload.query else {})
-    log.info(
-        "工具调用完成",
-        tool=result.tool,
-        ok=result.ok,
-        durationMs=round((time.perf_counter() - started) * 1000, 1),
-    )
     return {
         "ok": result.ok,
         "tool": result.tool,
@@ -228,34 +150,14 @@ def call_tool(name: str, payload: DocPayload, x_api_token: str | None = Header(d
 def agent_run(payload: DocPayload, x_api_token: str | None = Header(default=None)) -> dict[str, Any]:
     _check_token(x_api_token)
     if not payload.query.strip():
-        raise BadRequest("query 不能为空", code="EMPTY_QUERY")
-    started = time.perf_counter()
-    log.info("Agent 编排开始", htmlChars=len(payload.html), queryChars=len(payload.query))
-    out = run_agent(payload.html, payload.query)
-    log.info(
-        "Agent 编排完成",
-        tool=out.get("tool") or "-",
-        mock=out.get("mock"),
-        steps=len(out.get("steps") or []),
-        durationMs=round((time.perf_counter() - started) * 1000, 1),
-    )
-    return out
+        raise HTTPException(status_code=400, detail="query 不能为空")
+    return run_agent(payload.html, payload.query)
 
 
 @app.post("/v1/chat")
 def chat(payload: ChatPayload, x_api_token: str | None = Header(default=None)) -> dict[str, Any]:
     _check_token(x_api_token)
-    started = time.perf_counter()
     res = complete(payload.messages, model=payload.model, temperature=payload.temperature, max_tokens=payload.max_tokens)
-    log.info(
-        "对话完成",
-        model=res.model,
-        mock=res.mock,
-        ok=res.ok,
-        messages=len(payload.messages),
-        durationMs=round((time.perf_counter() - started) * 1000, 1),
-    )
-    # 失败原因回给调用方（前端会展示），同时 error 字段已在上游记录过日志
     return {"ok": res.ok, "text": res.text, "model": res.model, "mock": res.mock, "error": res.error}
 
 
@@ -272,7 +174,7 @@ DEFAULT_KB = os.getenv("LITEOFFICE_KB_ID", "kb_shared")
 def _require_admin(token: str | None) -> None:
     """写操作保护：设置了 LITEOFFICE_ADMIN_TOKEN 就必须带对；未设置则放开（仅课程演示）。"""
     if ADMIN_TOKEN and token != ADMIN_TOKEN:
-        raise Unauthorized("需要管理口令（X-Admin-Token）", code="BAD_ADMIN_TOKEN")
+        raise HTTPException(status_code=401, detail="需要管理口令（X-Admin-Token）")
 
 
 class KbDocPayload(BaseModel):
@@ -316,9 +218,7 @@ def kb_add_document(
     x_admin_token: str | None = Header(default=None),
 ) -> dict[str, Any]:
     _require_admin(x_admin_token)
-    log.info("知识库入库请求", kbId=kb_id, name=payload.name, chars=len(payload.content))
     r = KB.add_document(kb_id, payload.name, payload.content)
-    log.info("知识库入库完成", kbId=kb_id, docId=r.get("docId"), chunks=r.get("chunks"), deduped=r.get("deduped"))
     return {**r, "stats": KB.kb_stats(kb_id)}
 
 
@@ -330,11 +230,6 @@ def kb_delete_document(
 ) -> dict[str, Any]:
     _require_admin(x_admin_token)
     ok = KB.delete_document(doc_id)
-    if not ok:
-        # 删除不存在的文档：属于可预期的用户操作，记 warn 而不是 error
-        log.warning("删除不存在的知识库文档", kbId=kb_id, docId=doc_id)
-    else:
-        log.info("删除知识库文档", kbId=kb_id, docId=doc_id)
     return {"ok": ok, "stats": KB.kb_stats(kb_id)}
 
 
@@ -346,31 +241,20 @@ def kb_add_terms(
 ) -> dict[str, Any]:
     _require_admin(x_admin_token)
     n = KB.add_terms(kb_id, payload.terms)
-    log.info("写入术语表", kbId=kb_id, added=n, total=len(payload.terms))
     return {"added": n, "stats": KB.kb_stats(kb_id)}
 
 
 @app.post("/v1/kb/{kb_id}/search")
 def kb_search(kb_id: str, payload: KbQueryPayload) -> dict[str, Any]:
     """出口 A：问答用 —— 返回相关段落 + 出处。"""
-    started = time.perf_counter()
     hits = KB.search(kb_id, payload.query, top_k=payload.topK)
-    log.debug(
-        "知识库检索完成",
-        kbId=kb_id,
-        queryChars=len(payload.query),
-        hits=len(hits),
-        durationMs=round((time.perf_counter() - started) * 1000, 1),
-    )
     return {"query": payload.query, "hits": hits, "count": len(hits)}
 
 
 @app.post("/v1/kb/{kb_id}/evidence")
 def kb_evidence(kb_id: str, payload: KbEvidencePayload) -> dict[str, Any]:
     """出口 B：改写用 —— 返回术语 + 规范片段，供拼 prompt。"""
-    out = KB.build_evidence(kb_id, payload.selection, top_k=payload.topK)
-    log.debug("知识库证据组装完成", kbId=kb_id, terms=len(out.get("terms") or []), chunks=len(out.get("chunks") or []))
-    return out
+    return KB.build_evidence(kb_id, payload.selection, top_k=payload.topK)
 
 
 @app.get("/v1/kb")
@@ -436,3 +320,70 @@ class ImprovePayload(BaseModel):
 def doc_improve_route(payload: ImprovePayload) -> dict[str, Any]:
     """文档优化建议：分数 + 带位置的问题清单"""
     return IMPROVE.analyze(payload.html)
+
+class FeedbackPayload(BaseModel):
+    fingerprint: str = ""
+    rule: str
+    snippet: str = ""
+    action: str = "dismiss"      # dismiss=不用改 / accept=确实要改
+    genre: str = ""
+
+
+@app.post("/v1/doc/feedback")
+def doc_feedback(payload: FeedbackPayload) -> dict[str, Any]:
+    """记录「这条不用改」之类的反馈，下次检查同一处不再报"""
+    if not payload.fingerprint:
+        return {"ok": False, "reason": "缺少文档指纹"}
+    return FEEDBACK.record(
+        payload.fingerprint,
+        payload.rule,
+        payload.snippet or payload.rule,
+        action=payload.action,
+        genre=payload.genre,
+    )
+
+
+@app.get("/v1/doc/feedback/stats")
+def doc_feedback_stats() -> dict[str, Any]:
+    """反馈汇总：被否最多的规则，用于后续自动降级"""
+    return FEEDBACK.stats()
+
+class ReviewPayload(BaseModel):
+    html: str
+    genre: str | None = None
+    model: str | None = None
+    maxSections: int = 3
+    mode: str = "local"       # local=本机模型（默认，不联网） / cloud=调用云端模型
+
+
+@app.post("/v1/doc/review")
+def doc_review(payload: ReviewPayload) -> dict[str, Any]:
+    """
+    深度分析：给出具体问题 + 可直接采用的改写。
+
+    mode=local（默认）走本机 1.5B 模型，不发出任何网络请求；
+    mode=cloud 才调用云端模型。未装本地模型时如实报错，绝不偷偷走云。
+    """
+    if payload.mode == "cloud":
+        return REVIEW.review(
+            payload.html,
+            genre=payload.genre,
+            model=payload.model,
+            max_sections=max(1, min(payload.maxSections, 10)),
+        )
+    out = REVIEW_LOCAL.review_local(
+        payload.html,
+        genre=payload.genre,
+        max_sections=max(1, min(payload.maxSections, 6)),
+    )
+    return out
+
+
+@app.get("/v1/doc/review/status")
+def doc_review_status() -> dict[str, Any]:
+    """本地模型是否就绪（前端据此禁用/启用「离线深度分析」按钮）"""
+    return {
+        "localAvailable": REVIEW_LOCAL.available(),
+        "model": "qwen2.5-1.5b-instruct",
+        "modelDir": str(REVIEW_LOCAL.MODEL_DIR),
+    }

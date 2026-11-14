@@ -6,8 +6,7 @@ import ImportProgress from './components/app/ImportProgress.vue'
 import Toaster from './components/app/Toaster.vue'
 import ConfirmDialog from './components/ui/ConfirmDialog.vue'
 import FatalDialog from './components/ui/FatalDialog.vue'
-import AppIcon from './components/ui/AppIcon.vue'
-import { aiPanelOpen, openAiPanel } from './lib/aiPanelState'
+import { aiPanelOpen } from './lib/aiPanelState'
 
 /* AI 面板懒加载：只有第一次打开才 import 这个 chunk */
 const AiAssistantPanel = defineAsyncComponent(() => import('./components/ai/AiAssistantPanel.vue'))
@@ -35,16 +34,6 @@ watch(aiPanelOpen, (open) => {
       <Toaster />
       <ConfirmDialog />
       <FatalDialog />
-      <button
-        v-if="!aiPanelOpen"
-        type="button"
-        aria-label="打开 AI 助手"
-        class="lo-press fixed bottom-5 right-5 z-40 flex h-[46px] w-[46px] items-center justify-center rounded-full text-white shadow-[0_10px_28px_-8px_rgba(10,132,255,0.75)]"
-        style="background-image: linear-gradient(135deg, #0a84ff 0%, #5e5ce6 100%)"
-        @click="openAiPanel()"
-      >
-        <AppIcon name="sparkles" class="h-5 w-5" :stroke-width="1.8" />
-      </button>
     </FileDropProvider>
   </ErrorBoundary>
 </template>

@@ -1,6 +1,7 @@
 /** 在编辑器里标注检查出来的问题位置 */
 
 import type { ImproveReport, ImproveIssue } from './improveClient'
+import { focusBlock } from './editorEdit'
 
 const MARK_CLASS = 'lo-issue-mark'
 const BADGE_ATTR = 'data-issue-badge'
@@ -58,12 +59,14 @@ export function markIssues(report: ImproveReport): number {
 /** 引用定位高亮（与问题标区分颜色） */
 export function markRefs(para: number): boolean {
   if (!Number.isInteger(para) || para < 0) return false
+  const ok = focusBlock(para) // 点引用 = 光标跳到那一段
+  if (!ok) return false
   const blocks = editorBlocks()
   const el = blocks[para]
-  if (!el) return false
-  el.scrollIntoView({ block: 'center', behavior: 'smooth' })
-  el.classList.add('lo-ref-flash')
-  window.setTimeout(() => el.classList.remove('lo-ref-flash'), 1600)
+  if (el) {
+    el.classList.add('lo-ref-flash')
+    window.setTimeout(() => el.classList.remove('lo-ref-flash'), 1600)
+  }
   return true
 }
 

@@ -19,7 +19,6 @@
  */
 import { spawn } from 'node:child_process'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import zlib from 'node:zlib'
 
@@ -89,31 +88,16 @@ function findBrowser() {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
-/* ---------------- 运行地址（端口不写死，可用环境变量覆盖） ---------------- */
-/** 测试服务绑定的主机地址，默认仅本机 */
-const HOST = process.env.LITEOFFICE_TEST_HOST ?? '127.0.0.1'
-/** CDP 调试端口：0 表示由浏览器自动分配（从 DevToolsActivePort 读取真实端口） */
-const CDP_PORT = Number(process.env.CDP_PORT ?? 0) || 0
-
-/** 从 vite 实际监听地址取端口，避免 port: 0 时拼出 :0 */
-function resolveServerPort(server) {
-  const address = server.httpServer?.address?.()
-  if (address && typeof address === 'object' && address.port) return address.port
-  const configured = Number(server.config?.server?.port)
-  return Number.isFinite(configured) && configured > 0 ? configured : null
-}
-
 async function launchDevServer() {
   const { createServer } = await import('vite')
   const server = await createServer({
-    server: { port: 0, strictPort: false, host: HOST },
+    server: { port: 0, strictPort: false, host: '127.0.0.1' },
     logLevel: 'silent',
     optimizeDeps: { noDiscovery: true },
   })
   await server.listen()
   const urls = server.resolvedUrls?.local ?? []
-  const port = resolveServerPort(server)
-  return { server, url: urls[0] ?? `http://${HOST}:${port ?? '<port>'}/` }
+  return { server, url: urls[0] ?? `http://127.0.0.1:${server.config.server.port}/` }
 }
 
 async function launchBrowser(profile) {
@@ -121,7 +105,7 @@ async function launchBrowser(profile) {
   if (!executable) throw new Error('未找到 Chrome / Edge，可设置 CHROME_PATH 指向可执行文件')
   fs.rmSync(profile, { recursive: true, force: true, maxRetries: 3, retryDelay: 150 })
   fs.mkdirSync(profile, { recursive: true })
-  const port = CDP_PORT
+  const port = 9333
   const child = spawn(
     executable,
     [
@@ -137,37 +121,21 @@ async function launchBrowser(profile) {
     { stdio: 'ignore', detached: true },
   )
   child.unref()
-  // port 为 0 时浏览器会自动选端口，并把真实端口写进 profile/DevToolsActivePort
-  const readCdpPort = () => {
-    if (port > 0) return port
+  for (let i = 0; i < 120; i++) {
     try {
-      const [firstLine] = fs.readFileSync(path.join(profile, 'DevToolsActivePort'), 'utf8').split('\n')
-      const actual = Number(firstLine)
-      return Number.isFinite(actual) && actual > 0 ? actual : 0
+      const res = await fetch(`http://127.0.0.1:${port}/json/version`)
+      if (res.ok) return { port, browser: (await res.json()).Browser, child }
     } catch {
-      return 0
+      /* 继续等待 */
     }
-  }
-  const waitForCdp = async (attempts) => {
-    const actualPort = readCdpPort()
-    if (actualPort) {
-      try {
-        const res = await fetch(`http://${HOST}:${actualPort}/json/version`)
-        if (res.ok) return { port: actualPort, browser: (await res.json()).Browser, child }
-      } catch {
-        /* 继续等待 */
-      }
-    }
-    if (attempts <= 0) throw new Error('浏览器 CDP 未就绪')
     await sleep(200)
-    return waitForCdp(attempts - 1)
   }
-  return waitForCdp(120)
+  throw new Error('浏览器 CDP 未就绪')
 }
 
 async function runInBrowser(port, url, base64Docx) {
   const target = await (
-    await fetch(`http://${HOST}:${port}/json/new?${encodeURIComponent(url)}`, { method: 'PUT' })
+    await fetch(`http://127.0.0.1:${port}/json/new?${encodeURIComponent(url)}`, { method: 'PUT' })
   ).json()
   const ws = new WebSocket(target.webSocketDebuggerUrl)
   await new Promise((resolve, reject) => {
@@ -201,11 +169,11 @@ async function runInBrowser(port, url, base64Docx) {
   await send('Runtime.enable')
   await sleep(1200)
 
-  const expression = String.raw`(async () => {
+  const expression = `(async () => {
     const docx = await import('/src/lib/docx.ts')
     const bin = atob(${JSON.stringify(base64Docx)})
     const input = new Uint8Array(bin.length)
-    for (let i = 0; i < bin.length; i++) input[i] = bin.codePointAt(i) ?? 0
+    for (let i = 0; i < bin.length; i++) input[i] = bin.charCodeAt(i)
     const parsed = await docx.parseDocx(input.buffer)
     const report = { imagesEmbedded: 0, imagesSkipped: [], extensions: [] }
     const exported = docx.buildDocx(parsed.html, 'export-check', report)
@@ -213,9 +181,9 @@ async function runInBrowser(port, url, base64Docx) {
     let out = ''
     const chunk = 0x8000
     for (let i = 0; i < exported.length; i += chunk) {
-      out += String.fromCodePoint.apply(null, Array.from(exported.subarray(i, i + chunk)))
+      out += String.fromCharCode.apply(null, Array.from(exported.subarray(i, i + chunk)))
     }
-    const countingHtml = parsed.html.match(/<img\b/gi)?.length ?? 0
+    const countingHtml = parsed.html.match(/<img\\b/gi)?.length ?? 0
     return {
       inputImages: parsed.images.length,
       htmlImages: countingHtml,
@@ -245,7 +213,7 @@ async function runInBrowser(port, url, base64Docx) {
 const startedAt = Date.now()
 let dev
 let browser
-const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'lo-docx-check-'))
+const profile = path.join(process.env.TMPDIR || process.cwd(), 'lo-docx-check-profile')
 try {
   const fileBuffer = fs.readFileSync(input)
   console.log(`输入文件: ${input} (${fileBuffer.length.toLocaleString('en-US')} 字节)`)

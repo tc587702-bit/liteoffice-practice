@@ -17,9 +17,29 @@ from app import (
     pipelines,
 )
 from app import pipelines as PIPE
+from app.classify_genre import GENRES
 
 KB_ID = "lab"
 FAILED = 0
+
+# 公文语料库（迁移后的正式名）；见 tools/migrate_genre_kb.py
+GONGWEN_KB_ID = "gongwen"
+LAB_KB_ID = "lab_report"   # 实验报告语料库（硅二极管等术语归位于此）
+
+
+def _pick_kb() -> str:
+    """
+    选出真正有语料的库 id。
+
+    历史包袱：旧脚本把 25 份【公文】装进了 KB_ID="lab"，而多文体改造后
+    "lab" 指【实验报告】文体，公文已迁到 "gongwen"。
+    本自检的 1/2/9/10/11 节查的是公文语料（安置房、绿色工厂），
+    所以这里优先用有数据的公文库；都为空时回落到 KB_ID 让失败信息可读。
+    """
+    for cand in (GONGWEN_KB_ID, KB_ID):
+        if kb.kb_stats(cand)["chunks"] > 0:
+            return cand
+    return GONGWEN_KB_ID
 
 
 def check(name: str, ok: bool, detail: str = "") -> None:
@@ -30,8 +50,13 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 
 
 def main() -> int:
+    # 运行时解析：公文语料已从 "lab" 迁到 "gongwen"，硬编码 KB_ID 会查到空库
+    global KB_ID
+    KB_ID = _pick_kb()
     stats = kb.kb_stats(KB_ID)
-    print(f"语料：{stats['documents']} 份 / {stats['chunks']} 块\n")
+    print(f"语料库：{KB_ID} —— {stats['documents']} 份 / {stats['chunks']} 块")
+    lab_stats = kb.kb_stats(LAB_KB_ID)
+    print(f"实验报告库：{LAB_KB_ID} —— {lab_stats['documents']} 份 / {lab_stats['chunks']} 块\n")
 
     print("=== 1) 问答：有命中 ===")
     r = pipelines.qa(KB_ID, "安置房建设的进度怎么样")
@@ -57,17 +82,18 @@ def main() -> int:
     check("拒绝并说明", r4["ok"] is False, r4.get("answer", ""))
 
     print("\n=== 5) 改写：术语替换生效 ===")
-    # 先保证库里有一条术语
-    kb.add_terms(KB_ID, [{"term": "硅二极管", "canonical": "硅整流二极管", "note": "标准名"}])
+    # 硅二极管是【实验报告】领域术语。改写会按判定文体自动选库到 lab_report，
+    # 所以术语要写进 lab_report，否则查不到、替换不生效。
+    kb.add_terms(LAB_KB_ID, [{"term": "硅二极管", "canonical": "硅整流二极管", "note": "标准名"}])
     sel = "本次实验测量了硅二极管的正向压降，硅二极管在导通后压降基本恒定。"
-    w = pipelines.rewrite(KB_ID, sel)
+    w = pipelines.rewrite(LAB_KB_ID, sel)
     print(f"  原文：{sel}")
     print(f"  候选：{w['candidate']}")
     print(f"  改动：{w['changes']}")
     check("约定字段齐全", all(k in w for k in ("candidate", "changes", "evidence", "checklist", "genre")), str(list(w.keys())[:6]))
     check("术语被替换", "硅整流二极管" in w["candidate"] and "硅二极管" not in w["candidate"])
     check("改动有记录", any(c["type"] == "term" for c in w["changes"]))
-    check("给出文体", w["genre"] in ("lab", "gongwen", "thesis", "essay_arg", "essay_narr", "expository"), w["genre"])
+    check("给出文体", w["genre"] in GENRES, w["genre"])
 
     print("\n=== 6) 改写：文体判定影响检查清单 ===")
     w2 = pipelines.rewrite(KB_ID, "那天雨下得很大，我站在校门口，忽然看见母亲撑着一把旧伞走来。")

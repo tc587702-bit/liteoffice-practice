@@ -71,6 +71,19 @@ ZH_NUM = {
 
 SUMMARIZE_RE = r"总结|概括|摘要|讲了什么|主要内容|归纳|大意|核心内容"
 
+# 意图 → 首选工具（分类器输出的意图直接映射成一个工具）
+INTENT_TOOL = {
+    "structure": "doc_brief",
+    "section": "doc_section",
+    "fact": "doc_search",
+    "improve": "doc_improve",
+    "kb": "kb_search",
+    "stats": "get_stats",
+}
+
+# 分类器置信度低于这个值就回退到关键词规则
+INTENT_MIN_CONF = 0.35
+
 
 class AgentState(TypedDict, total=False):
     html: str
@@ -346,7 +359,13 @@ def _build_context(html: str, query: str, observations: list[dict[str, Any]], bu
 
     # ④ 章节标题清单（让模型知道结构，即使正文没进预算）
     if dm.sections:
-        outline = "；".join(f"{s.number}{s.title}" for s in dm.sections[:12])
+        def _label(s) -> str:
+            # docmap 的 title 可能已经带编号（"一、基本情况"），避免拼成「一、一、基本情况」
+            num = (s.number or "").strip()
+            title = (s.title or "").strip()
+            return title if title.startswith(num) or not num else f"{num}{title}"
+
+        outline = "；".join(_label(s) for s in dm.sections[:12])
         if not add(f"文档结构：{outline}", "【结构】"):
             return "\n\n".join(chunks)
 
@@ -406,6 +425,20 @@ def _heuristic_plan(query: str) -> list[str]:
         return []
 
     plan: list[str] = []
+
+    # ① 先看分类器：整句分布判断意图，比单个关键词准
+    #    （"这份文档有什么问题" 同时命中「问题」与「检查」，分类器能分清）
+    try:
+        from .intent import classify_intent
+
+        judged = classify_intent(query)
+        tool = INTENT_TOOL.get(judged["intent"])
+        if tool and judged["confidence"] >= INTENT_MIN_CONF:
+            plan.append(tool)
+    except Exception:  # noqa: BLE001 分类器坏了也不能影响主流程
+        pass
+
+    # ② 关键词兜底/补充：分类器低置信时由它决定，高置信时用于补辅助工具
     for pattern, tool in INTENTS:
         if re.search(pattern, query) and tool not in plan:
             plan.append(tool)
@@ -445,17 +478,107 @@ def _next_offline_tool(pending: list[str], used: list[str]) -> str | None:
     return None
 
 
+def _balanced_json(text: str) -> str | None:
+    """
+    从文本里截出第一个「括号配平」的 JSON 对象。
+
+    为什么不用正则 `\{[\s\S]*\}`：贪婪匹配会把后面的说明文字一起吞进来，
+    导致 json.loads 失败；模型输出被 max_tokens 截断时，正则也救不回来。
+    """
+    start = text.find("{")
+    while start != -1:
+        depth = 0
+        in_str = False
+        escape = False
+        for i in range(start, len(text)):
+            ch = text[i]
+            if in_str:
+                if escape:
+                    escape = False
+                elif ch == "\\":
+                    escape = True
+                elif ch == '"':
+                    in_str = False
+                continue
+            if ch == '"':
+                in_str = True
+            elif ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    return text[start : i + 1]
+        start = text.find("{", start + 1)
+    return None
+
+
+def _repair_truncated(text: str) -> str | None:
+    """
+    模型输出被截断（JSON 少了右括号、甚至字符串没闭合）时，尽量把内容救回来。
+
+    两种截断都要处理：
+      · final_answer 后面还有别的键，但整体少了 }        → 正则能取到完整值
+      · final_answer 的值本身被切断（连结束引号都没有）  → 取到文本末尾为止
+    """
+    # ① 值完整（有结束引号）
+    fa = re.search(r'"final_answer"\s*:\s*"((?:[^"\\]|\\.)*)"', text, re.S)
+    if fa:
+        return json.dumps({"action": None, "final_answer": fa.group(1)}, ensure_ascii=False)
+
+    # ② 值被切断：从 "final_answer":" 之后一直取到末尾，去掉尾部残缺
+    start = re.search(r'"final_answer"\s*:\s*"', text)
+    if start:
+        rest = text[start.end() :]
+        cut = None
+        escape = False
+        for i, ch in enumerate(rest):
+            if escape:
+                escape = False
+                continue
+            if ch == "\\":
+                escape = True
+                continue
+            if ch == '"':
+                cut = i
+                break
+        value = rest if cut is None else rest[:cut]
+        # 去掉尾部可能残留的 ,"thought": 之类
+        value = re.split(r'"\s*,\s*"', value)[0].strip()
+        if value:
+            return json.dumps({"action": None, "final_answer": value}, ensure_ascii=False)
+
+    action = re.search(r'"action"\s*:\s*"([a-z_]+)"', text)
+    if action:
+        return json.dumps({"action": action.group(1), "action_input": {}}, ensure_ascii=False)
+    return None
+
+
 def _parse_react(text: str) -> dict[str, Any]:
-    """解析模型的 ReAct 输出：优先 JSON，退化到关键词行"""
+    """
+    解析模型的 ReAct 输出：优先 JSON，退化到关键词行。
+
+    三层容错：
+      ① 去掉 ```json 围栏后按配平括号取 JSON
+      ② 失败则尝试修复被截断的输出
+      ③ 仍失败则按 Action/Final Answer 关键词行解析
+    """
     t = (text or "").strip()
-    m = re.search(r"\{[\s\S]*\}", t)
-    if m:
-        try:
-            obj = json.loads(m.group(0))
-            if isinstance(obj, dict):
-                return obj
-        except json.JSONDecodeError:
-            pass
+    t = re.sub(r"^```[a-zA-Z]*\s*", "", t)
+    t = re.sub(r"\s*```$", "", t).strip()
+
+    candidate = _balanced_json(t) or t
+    try:
+        obj = json.loads(candidate)
+        if isinstance(obj, dict):
+            # 兼容几种常见写法：final / answer / finalAnswer
+            for key in ("final", "answer", "finalAnswer"):
+                if key in obj and not obj.get("final_answer"):
+                    obj["final_answer"] = obj[key]
+            return obj
+    except json.JSONDecodeError:
+        repaired = _repair_truncated(t)
+        if repaired:
+            return json.loads(repaired)
 
     action = None
     mm = re.search(r"Action\s*[:：]\s*([a-z_]+)", t, re.IGNORECASE)
@@ -532,7 +655,8 @@ def node_think(state: AgentState) -> AgentState:
 5. 引用文档位置时用【第 N 段】标注，N 与上面的块序号一致（从 1 开始）。
 6. 最多 {MAX_STEPS} 步。
 """
-    res = complete([{"role": "user", "content": prompt}], model=state.get("model"), max_tokens=400)
+    # 400 太小：final_answer 里带 Markdown 时 JSON 会被截断，解析失败后答案直接丢
+    res = complete([{"role": "user", "content": prompt}], model=state.get("model"), max_tokens=900)
     parsed = _parse_react(res.text)
 
     if parsed.get("final_answer"):
@@ -640,8 +764,22 @@ def node_final(state: AgentState) -> AgentState:
     observations = state.get("observations") or []
     context = _build_context(state.get("html", ""), state.get("query", ""), observations)
 
+    # 排序：具体结果（建议 / 命中 / 章节正文）优先，章节概要放最后。
+    # 否则问"哪里要改"时，答案开头全是章节列表，建议被挤到后面。
+    def _weight(obs: dict) -> int:
+        tool = obs.get("tool", "")
+        if tool in ("doc_improve", "diagnose_report"):
+            return 0
+        if tool in ("doc_search", "search_document", "kb_search"):
+            return 1
+        if tool == "doc_section":
+            return 2
+        if tool == "doc_brief":
+            return 9
+        return 3
+
     lines: list[str] = []
-    for o in observations:
+    for o in sorted(observations, key=_weight):
         if not o.get("ok"):
             lines.append(o.get("summary", "（工具失败）"))
             continue
@@ -707,6 +845,8 @@ def node_final(state: AgentState) -> AgentState:
         return {
             **state,
             "answer": f"（未生成答案）文档上下文：\n{context[:800]}",
+            # 没调模型就必须标 mock，否则前端不显示「离线模拟」，用户会误以为是模型分析
+            "mock": True,
             "steps": _step(state, "final", "无工具结果，返回上下文摘要"),
         }
 
@@ -714,6 +854,8 @@ def node_final(state: AgentState) -> AgentState:
     return {
         **state,
         "answer": answer,
+        # 同上：这条分支是规则拼接工具摘要，不是模型生成，必须如实标 mock
+        "mock": True,
         "steps": _step(state, "final", f"汇总 {len(lines)} 条观察结果"),
     }
 

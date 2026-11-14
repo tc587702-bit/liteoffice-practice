@@ -100,6 +100,36 @@ def complete(
         return LlmResult(False, "", model, mock=False, error=str(exc)[:200])
 
 
+
+def _balanced_json(text: str) -> str | None:
+    """从文本里截出第一个括号配平的 JSON 对象；没有则返回 None"""
+    start = text.find("{")
+    while start != -1:
+        depth = 0
+        in_str = False
+        escape = False
+        for i in range(start, len(text)):
+            ch = text[i]
+            if in_str:
+                if escape:
+                    escape = False
+                elif ch == "\\":
+                    escape = True
+                elif ch == '"':
+                    in_str = False
+                continue
+            if ch == '"':
+                in_str = True
+            elif ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    return text[start : i + 1]
+        start = text.find("{", start + 1)
+    return None
+
+
 def _call_direct(messages: list[dict[str, str]], model: str, max_tokens: int, temperature: float) -> str:
     """
     直连 OpenAI 兼容接口（DeepSeek / OpenAI）。
@@ -136,7 +166,23 @@ def _call_direct(messages: list[dict[str, str]], model: str, max_tokens: int, te
         try:
             with urllib.request.urlopen(req, timeout=60) as resp:
                 data = _json.loads(resp.read().decode("utf-8"))
-            return data["choices"][0]["message"]["content"] or ""
+            choice = (data.get("choices") or [{}])[0]
+            message = choice.get("message") or {}
+            content = (message.get("content") or "").strip()
+            # 推理模型（deepseek-flash 等）有时把整段输出放进 reasoning_content，
+            # content 留空；只读 content 会表现为「模型返回空」，答案被整条丢掉。
+            if not content:
+                # 推理模型的 reasoning_content 里可能藏着动作 JSON，
+                # 但那是「思考」不是答案：只把其中的 JSON 片段取出来，
+                # 绝不把整段思考当正文返回（否则前端会把思考显示成答案）。
+                reasoning = (message.get("reasoning_content") or "").strip()
+                if reasoning:
+                    candidate = _balanced_json(reasoning)
+                    if candidate:
+                        content = candidate
+            if not content and choice.get("finish_reason") == "length":
+                raise RuntimeError("模型输出被 max_tokens 截断，且没有可用内容")
+            return content
         except urllib.error.HTTPError as exc:
             last_error = f"HTTP {exc.code}"
             # 5xx 是服务端抖动，值得重试；4xx（Key/额度/参数）重试也没用

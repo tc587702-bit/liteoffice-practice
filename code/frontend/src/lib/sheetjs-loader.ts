@@ -1,8 +1,5 @@
 import * as XLSX from 'xlsx'
 import type { SheetJsModule } from 'sheetjs'
-import { createLogger } from './logger'
-
-const log = createLogger('sheetjs')
 
 /**
  * SheetJS 直接使用 npm 包 `xlsx`（不再从 public/vendor 或任何 http 地址动态 import）。
@@ -18,12 +15,9 @@ export function loadSheetJS(): Promise<SheetJsModule> {
       if (typeof lib.read !== 'function' || !lib.utils) {
         throw new Error('SheetJS 模块结构异常')
       }
-      log.debug('SheetJS 已加载')
       return lib
     })
-    loading.catch((error) => {
-      // 加载失败后清空缓存，允许下次重试；同时留痕，否则只会看到一句「解析失败」
-      log.error('SheetJS 加载失败', error)
+    loading.catch(() => {
       loading = null
     })
   }

@@ -1,6 +1,3 @@
-import { createLogger } from './logger'
-
-const log = createLogger('markdown')
 /* ------------------------------------------------------------------ */
 /* 通用：HTML 转义（所有文本渲染必须经过这里，禁止直出未转义内容）      */
 /* ------------------------------------------------------------------ */
@@ -18,7 +15,6 @@ export function escapeHtml(text: string): string {
 function safeUrl(url: string): string | null {
   const trimmed = url.trim()
   if (/^(https?:|mailto:|#|\.\/|\/)/i.test(trimmed)) return trimmed
-  log.warn('已拦截不安全的链接协议', { url: trimmed.slice(0, 40) })
   return null
 }
 

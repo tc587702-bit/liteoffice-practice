@@ -408,6 +408,9 @@ body {
   line-height: 1.75;
   color: #1d1d1f;
   font-size: 15px;
+  /* 明确文本指针与插入点颜色，不依赖浏览器默认值 */
+  cursor: text;
+  caret-color: #1d1d1f;
 }
 .lo-editor:empty::before {
   content: attr(data-placeholder);
@@ -611,32 +614,36 @@ body {
 .lo-issue-mark {
   position: relative;
   border-radius: 4px;
-  padding-left: 6px;
-  border-left: 3px solid transparent;
+  padding-left: 8px;
+  border-left: 4px solid transparent;
 }
 .lo-issue-error {
   border-left-color: #ff453a;
-  background-color: rgba(255, 69, 58, 0.06);
+  background-color: rgba(255, 69, 58, 0.13);
 }
 .lo-issue-warning {
   border-left-color: #ffb340;
-  background-color: rgba(255, 179, 64, 0.06);
+  background-color: rgba(255, 179, 64, 0.13);
 }
 .lo-issue-info {
   border-left-color: #8e8e93;
-  background-color: rgba(142, 142, 147, 0.05);
+  background-color: rgba(142, 142, 147, 0.11);
 }
 .lo-issue-mark::after {
   content: attr(data-issue-badge);
   position: absolute;
-  right: 4px;
-  top: 2px;
-  font-size: 10px;
-  line-height: 14px;
-  padding: 0 4px;
-  border-radius: 7px;
-  background: rgba(255, 69, 58, 0.9);
+  right: 6px;
+  top: 3px;
+  min-width: 16px;
+  text-align: center;
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 16px;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: rgba(255, 69, 58, 0.95);
   color: #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
 }
 .lo-issue-warning::after { background: rgba(255, 179, 64, 0.95); color: #1c1c1e; }
 .lo-issue-info::after { background: rgba(142, 142, 147, 0.95); }
@@ -646,4 +653,68 @@ body {
   border-bottom: 2px solid rgba(48, 209, 88, 0.85);
   background-color: rgba(48, 209, 88, 0.07);
   border-radius: 3px;
+}
+
+/* ---------- 纸面色调（纯白刺眼、浅色指针在白底上会"消失"，给三档） ---------- */
+:root {
+  --lo-paper: #ffffff;      /* 白：跟 Word 一致 */
+  --lo-paper-ink: #1d1d1f;
+}
+.lo-paper-soft {
+  --lo-paper: #f6f4ef;      /* 米：护眼，长时间看不刺 */
+  --lo-paper-ink: #23211c;
+}
+.lo-paper-dark {
+  --lo-paper: #141416;      /* 暗：近黑，配白字，浅色指针也看得见 */
+  --lo-paper-ink: #f2f2f5;
+}
+.lo-paper-surface {
+  background-color: var(--lo-paper);
+  transition: background-color 160ms ease;
+}
+.lo-paper-surface .lo-editor {
+  color: var(--lo-paper-ink);
+  caret-color: var(--lo-paper-ink);
+}
+.lo-paper-surface .lo-editor a {
+  color: #0a6fd8;
+}
+.lo-paper-dark .lo-editor a {
+  color: #6fb6ff;
+}
+.lo-paper-dark .lo-editor th,
+.lo-paper-dark .lo-editor td {
+  border-color: rgba(255, 255, 255, 0.18);
+}
+.lo-paper-dark .lo-editor th {
+  background-color: rgba(255, 255, 255, 0.06);
+}
+
+
+/* 正文里点标记时，右侧对应建议卡片闪一下 */
+.lo-card-flash {
+  animation: lo-card 1.4s ease-out;
+  border-color: rgba(10, 132, 255, 0.7) !important;
+}
+@keyframes lo-card {
+  0% { background-color: rgba(10, 132, 255, 0.22); }
+  100% { background-color: transparent; }
+}
+
+/* 暗色纸面上，标记底色要更明显一点才看得见 */
+.lo-paper-dark .lo-issue-error { background-color: rgba(255, 69, 58, 0.24); }
+.lo-paper-dark .lo-issue-warning { background-color: rgba(255, 179, 64, 0.24); }
+.lo-paper-dark .lo-issue-info { background-color: rgba(142, 142, 147, 0.2); }
+.lo-paper-dark .lo-ref-mark {
+  background-color: rgba(48, 209, 88, 0.16);
+  border-bottom-color: rgba(48, 209, 88, 0.95);
+}
+
+/* 暗色纸面上点建议时的闪烁：亮一档，正常缩放下也看得见 */
+.lo-paper-dark .lo-locate-flash {
+  animation: lo-locate-dark 1.6s ease-out;
+}
+@keyframes lo-locate-dark {
+  0% { background-color: rgba(10, 132, 255, 0.45); }
+  100% { background-color: transparent; }
 }

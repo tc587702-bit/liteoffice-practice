@@ -1,9 +1,6 @@
 import { entryText, unzip } from './zip'
-import { descendants } from './xml'
+import { descendants, parseXmlFromZip } from './xml'
 import type { PersistedSheet } from './xlsx'
-import { createLogger } from './logger'
-
-const log = createLogger('file')
 
 export type FileKind = 'docx' | 'xlsx' | 'pptx' | 'md' | 'pdf' | 'unknown'
 
@@ -64,17 +61,10 @@ export function decodeText(buffer: ArrayBuffer): DecodeResult {
     const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
     return { text, encoding: 'utf-8' }
   } catch {
-    // UTF-8 严格解码失败：中文环境大概率是 GBK 系编码，属于预期分支，用 debug
-    log.debug('UTF-8 解码失败，尝试 GB18030', { bytes: bytes.length })
     try {
       const text = new TextDecoder('gb18030', { fatal: false }).decode(bytes)
       return { text, encoding: 'gb18030' }
-    } catch (error) {
-      // 连 gb18030 都不支持：只能非严格 UTF-8 兜底，会有乱码但不会丢文件
-      log.warn('GB18030 解码也失败，改用非严格 UTF-8', {
-        bytes: bytes.length,
-        error: error instanceof Error ? error.message : String(error),
-      })
+    } catch {
       return { text: new TextDecoder('utf-8').decode(bytes), encoding: 'utf-8' }
     }
   }
@@ -130,13 +120,7 @@ export async function parsePptx(buffer: ArrayBuffer): Promise<PptResult> {
         title: lines[0] ?? `第 ${slides.length + 1} 页`,
         lines: lines.slice(1),
       })
-    } catch (error) {
-      // 单页失败不影响整份演示文稿：降级展示 + 记录具体是哪一页的哪个文件
-      log.warn('PPT 单页解析失败，已降级', {
-        slide: slides.length + 1,
-        entry: name,
-        error: error instanceof Error ? error.message : String(error),
-      })
+    } catch {
       warnings.push(`第 ${slides.length + 1} 页部分内容无法解析，已展示可读部分`)
     }
   }
@@ -155,5 +139,4 @@ export interface PreviewData {
   plainText?: string
 }
 
-export { entryText }
-export { parseXmlFromZip } from './xml'
+export { entryText, parseXmlFromZip }

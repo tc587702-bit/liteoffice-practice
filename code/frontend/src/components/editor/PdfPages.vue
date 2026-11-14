@@ -5,9 +5,6 @@ import { loadPdfDocument, renderPdfPageToCanvas } from '../../lib/pdf'
 import { getPdfDocument } from '../../lib/pdfCache'
 import type { DocRecord } from '../../lib/db'
 import type { PdfPageInfo } from '../../lib/pdf'
-import { createLogger } from '../../lib/logger'
-
-const log = createLogger('pdf-pages')
 
 const props = defineProps<{ doc: DocRecord }>()
 
@@ -61,8 +58,6 @@ async function drainQueue() {
         await renderPdfPageToCanvas(doc, index, canvas, host.clientWidth || 640)
         states.value = { ...states.value, [index]: 'done' }
       } catch (error) {
-        // 单页渲染失败只影响该页，记录页号便于判断是「文件问题」还是「渲染问题」
-        log.error('PDF 页面渲染失败', error, { page: index + 1 })
         states.value = { ...states.value, [index]: 'error' }
         errors.value = { ...errors.value, [index]: (error as Error).message }
       }
@@ -137,8 +132,6 @@ onMounted(async () => {
   try {
     await ensureDoc()
   } catch (error) {
-    // 文档都加载不了：整块 PDF 预览不可用，属于 error
-    log.error('PDF 文档加载失败，预览不可用', error)
     errors.value = { ...errors.value, 1: (error as Error).message }
   }
   scan()

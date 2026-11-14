@@ -14,10 +14,11 @@
 """
 from __future__ import annotations
 
+import os
 import re
 from typing import Any
 
-from . import kb
+from . import embed, kb
 from .classify_genre import GENRE_LABEL, classify
 from .llm import DEFAULT_MODEL, complete, has_credentials
 from .query_expand import search_expanded
@@ -50,8 +51,50 @@ def _is_noisy(text: str) -> bool:
     return digits / len(flat) > 0.55
 
 
+_embedder = None
+_embedder_tried = False
+
+
+def _get_embedder():
+    """惰性加载本地向量模型；没装模型/没装 torch 时返回 None（自动退回 BM25）"""
+    global _embedder, _embedder_tried
+    if _embedder_tried:
+        return _embedder
+    _embedder_tried = True
+    try:
+        from .embed_local import get_embedder
+
+        _embedder = get_embedder()
+    except Exception:  # noqa: BLE001 缺模型/缺依赖都不该影响主流程
+        _embedder = None
+    return _embedder
+
+
 def retrieve(kb_id: str, query: str, top_k: int = 5) -> tuple[list[dict], list[str]]:
-    """检索 + 同义扩展 + RRF；过滤表格碎片等噪声块"""
+    """
+    检索：优先「BM25 + 向量」加权混合，向量不可用时退回 BM25 + 同义扩展。
+
+    可关闭混合：设置 LITEOFFICE_RETRIEVAL=bm25；默认 hybrid。
+    """
+    mode = os.getenv("LITEOFFICE_RETRIEVAL", "hybrid")
+    vectors = 0
+    if mode == "hybrid":
+        try:
+            vectors = int(embed.vector_stats(kb_id).get("embedded") or 0)
+        except Exception:  # noqa: BLE001
+            vectors = 0
+    if mode == "hybrid" and vectors:
+        emb = _get_embedder()
+        if emb is not None:
+            try:
+                out = embed.hybrid_search(kb_id, query, embedder=emb, top_k=top_k + 4)
+                hits = out.get("hits") or []
+                if hits:
+                    cleaned = [h for h in hits if not _is_noisy(h["text"])]
+                    return (cleaned or hits)[:top_k], out.get("variants") or [query]
+            except Exception:  # noqa: BLE001 混合失败就退回 BM25，不能让检索挂掉
+                vectors = 0  # 降级为纯 BM25，不让检索挂掉
+
     hits, variants = search_expanded(kb, kb_id, query, top_k=top_k + 4)
     if not hits:
         hits, variants = kb.search(kb_id, query, top_k=top_k + 4), [query]
@@ -318,7 +361,54 @@ CHECKLIST = {
     "essay_arg": ["论点明确", "论据具体", "结尾不喊口号"],
     "essay_narr": ["有细节与场景", "时间线清楚", "情感通过动作表达"],
     "expository": ["定义准确", "顺序清晰", "少用修饰"],
+    "contract": ["主体与标的明确", "权利义务对等", "违约责任可执行", "争议解决方式与管辖明确"],
+    "resume": ["用动词开头描述成果", "成果量化（数字与规模）", "不写与岗位无关的经历", "不用主观自夸形容"],
+    "news": ["导语含时间地点人物事件", "倒金字塔（重要信息在前）", "引语标明出处", "事实与评论分离"],
+    "legal": ["当事人称谓准确", "诉讼请求与事实理由对应", "援引法条写明条款号", "裁判主文可执行"],
+    "textbook": ["目标可测量（掌握/理解/了解）", "重难点分明", "例题配解答过程", "术语首次出现即定义"],
 }
+
+# 文体 → 知识库 id。与 app/multigenre.py 的 GENRE_KB 保持一致。
+# 单独列一份是为了不让 pipelines 反向依赖 multigenre（后者依赖本模块的 CHECKLIST 语义）。
+GENRE_KB_ID = {
+    "gongwen": "gongwen",
+    "lab": "lab_report",
+    "thesis": "thesis",
+    "essay_arg": "essay_arg",
+    "essay_narr": "essay_narr",
+    "expository": "expository",
+    "contract": "contract",
+    "resume": "resume",
+    "news": "news",
+    "legal": "legal",
+    "textbook": "textbook",
+}
+
+
+def _resolve_kb(kb_id: str, genre: str, inferred: bool) -> str:
+    """
+    按文体选库；文体不可信、目标库为空或就是当前库时，保持调用方给的 kb_id。
+
+    为什么需要：前端通常不传 genre，调用方给的默认库可能是空库
+    （历史遗留的 'lab' 已迁空），术语与规范片段全查不到，
+    改写就会退化成「原文原样返回」且不报错。
+
+    为什么要 inferred 这个开关：classify 判不出时会兜底成 gongwen，
+    那是猜测而非判定。用猜测去覆盖调用方明确传入的库会帮倒忙 ——
+    实测「本次实验测量了硅二极管…」判不出文体，兜底 gongwen，
+    若据此切库，实验报告术语就查不到了。所以只有真判定出来才切。
+    """
+    if not inferred:
+        return kb_id
+    target = GENRE_KB_ID.get(genre)
+    if not target or target == kb_id:
+        return kb_id
+    try:
+        if kb.kb_stats(target)["chunks"] > 0:
+            return target
+    except Exception:  # noqa: BLE001 库不可用时不该让整个改写失败
+        return kb_id
+    return kb_id
 
 
 def rewrite(
@@ -335,14 +425,26 @@ def rewrite(
         return {"ok": False, "candidate": "", "reason": "选中内容太短（至少 10 字）", "steps": steps}
 
     # ① 文体：用户指定优先，否则自动判定
+    #    inferred 标记「这个文体是不是可信的判定结果」——
+    #    用户指定或 classify 真判出来时为 True；兜底成 gongwen 时为 False。
+    #    _resolve_kb 只在 inferred=True 时才切换库，避免用猜测覆盖调用方的明确意图。
     if genre and genre in GENRE_LABEL:
-        g, g_conf, g_reason = genre, 1.0, "用户指定"
+        g, g_conf, g_reason, inferred = genre, 1.0, "用户指定", False
     else:
         r = classify(selection)
-        g = r["genre"] or "gongwen"
+        detected = r["genre"]
+        # 判不出时用 gongwen 兜底（沿用既有行为），但标记为不可信
+        g = detected or "gongwen"
         g_conf = r["confidence"]
         g_reason = r.get("reason", "")
+        inferred = bool(detected)
     steps.append({"phase": "genre", "detail": f"文体：{GENRE_LABEL.get(g, g)}（置信度 {g_conf:.2f}，{g_reason}）"})
+
+    # ①-b 按文体选库（仅在文体可信时；前端不传 genre 且能判出文体才切）
+    resolved = _resolve_kb(kb_id, g, inferred)
+    if resolved != kb_id:
+        steps.append({"phase": "genre", "detail": f"按文体切换知识库：{kb_id} → {resolved}"})
+    kb_id = resolved
 
     # ② 证据：术语 + 规范片段
     ev = kb.build_evidence(kb_id, selection, top_k=top_k)

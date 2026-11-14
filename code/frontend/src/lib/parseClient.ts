@@ -1,7 +1,4 @@
 import type { XlsxParseResult } from './xlsx'
-import { createLogger } from './logger'
-
-const log = createLogger('worker')
 
 /**
  * 解析 Worker 客户端。
@@ -36,25 +33,14 @@ interface WorkerReply<T> {
 let seed = 0
 
 function runWorker<T>(
-  name: string,
   factory: () => Worker,
   payload: Record<string, unknown>,
   options: WorkerRunOptions = {},
 ): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    const started = performance.now()
-    let worker: Worker
-    try {
-      worker = factory()
-    } catch (error) {
-      // Worker 构造失败（如浏览器禁用 worker / CSP 拦截）：把原始原因带出来
-      log.error('创建 Worker 失败', error, { worker: name })
-      reject(error instanceof Error ? error : new Error(String(error)))
-      return
-    }
+    const worker = factory()
     const id = ++seed
     let settled = false
-    log.debug('Worker 启动', { worker: name, id })
 
     const cleanup = () => {
       if (settled) return
@@ -63,9 +49,6 @@ function runWorker<T>(
       worker.terminate()
     }
     const fail = (error: Error) => {
-      const elapsed = Math.round(performance.now() - started)
-      if (error.name === 'AbortError') log.debug('Worker 已取消', { worker: name, id, elapsedMs: elapsed })
-      else log.warn('Worker 执行失败', { worker: name, id, elapsedMs: elapsed, errorName: error.name, message: error.message, payloadKeys: Object.keys(payload) })
       cleanup()
       reject(error)
     }
@@ -80,7 +63,7 @@ function runWorker<T>(
 
     worker.onmessage = (event: MessageEvent<WorkerReply<T>>) => {
       const data = event.data
-      if (data?.id !== id) return
+      if (!data || data.id !== id) return
       if (data.progress) {
         options.onProgress?.(data.progress)
         return
@@ -91,15 +74,12 @@ function runWorker<T>(
         fail(error)
         return
       }
-      log.debug('Worker 完成', { worker: name, id, elapsedMs: Math.round(performance.now() - started) })
       cleanup()
       resolve(data.result as T)
     }
     worker.onerror = (event) => {
-      // Worker 内部未捕获异常（多半是内存不足或 OOM 被浏览器杀掉）
       const error = new Error(event.message || 'Worker 崩溃（可能是内存不足）')
       error.name = 'WorkerError'
-      log.error('Worker 崩溃', error, { worker: name, filename: event.filename, lineno: event.lineno })
       fail(error)
     }
     worker.postMessage({ id, ...payload })
@@ -109,7 +89,6 @@ function runWorker<T>(
 /** Markdown → 安全 HTML（Worker） */
 export function renderMarkdownInWorker(text: string, options: WorkerRunOptions = {}): Promise<string> {
   return runWorker<string>(
-    'markdown',
     () => new Worker(new URL('./workers/md.worker.ts', import.meta.url), { type: 'module' }),
     { text },
     options,
@@ -122,7 +101,6 @@ export function parseXlsxInWorker(
   options: WorkerRunOptions = {},
 ): Promise<XlsxParseResult> {
   return runWorker<XlsxParseResult>(
-    'xlsx',
     () => new Worker(new URL('./workers/xlsx.worker.ts', import.meta.url), { type: 'module' }),
     { buffer },
     options,

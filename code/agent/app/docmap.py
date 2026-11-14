@@ -133,8 +133,12 @@ def find_section(html: str, key: str) -> Section | None:
     # 1) 纯数字 → 按序号
     if k.isdigit():
         idx = int(k)
-        if 1 <= idx <= len(dm.sections):
-            return dm.sections[idx - 1]
+        # 「第 2 部分」说的是 L1 章节（一、二、三），不能落到 L2 的 1./2./3.
+        # 例：瑕疵文档里 L2 的「3.适老化改造」不是「第 3 部分」
+        l1 = [s for s in dm.sections if s.level == 1]
+        pool = l1 or dm.sections
+        if 1 <= idx <= len(pool):
+            return pool[idx - 1]
         return None
 
     # 2) 编号精确匹配

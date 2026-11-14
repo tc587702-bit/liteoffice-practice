@@ -37,15 +37,21 @@ SYNONYM_GROUPS: list[list[str]] = [
 ]
 
 
-def expand(query: str, max_variants: int = 6) -> list[str]:
-    """生成查询变体：原查询 + 把命中的组内词替换成同组其他词"""
+def expand(query: str, max_variants: int = 6, groups: list[list[str]] | None = None) -> list[str]:
+    """
+    生成查询变体：原查询 + 把命中的组内词替换成同组其他词。
+
+    groups 为 None 时用模块级 SYNONYM_GROUPS（保持既有行为不变）；
+    多文体场景下由调用方传入该文体的同义词组，避免跨领域词表互相干扰。
+    """
     q = (query or "").strip()
     if not q:
         return []
 
+    active = SYNONYM_GROUPS if groups is None else groups
     variants = [q]
     hits: list[tuple[str, list[str]]] = []
-    for group in SYNONYM_GROUPS:
+    for group in active:
         found = [w for w in group if w in q]
         if found:
             alts = [w for w in group if w not in found]
@@ -91,9 +97,20 @@ def rrf_merge(result_lists: Iterable[list[dict]], k: int = 60, top_k: int = 5) -
     return merged
 
 
-def search_expanded(kb_module, kb_id: str, query: str, top_k: int = 5, per_query: int = 10) -> tuple[list[dict], list[str]]:
-    """先扩展查询，再对每个变体检索，最后 RRF 融合"""
-    variants = expand(query)
+def search_expanded(
+    kb_module,
+    kb_id: str,
+    query: str,
+    top_k: int = 5,
+    per_query: int = 10,
+    groups: list[list[str]] | None = None,
+) -> tuple[list[dict], list[str]]:
+    """
+    先扩展查询，再对每个变体检索，最后 RRF 融合。
+
+    groups 传入时用该文体的同义词组（多文体场景）；为 None 时用全局词表，行为不变。
+    """
+    variants = expand(query, groups=groups)
     if not variants:
         return [], []
     result_lists = [kb_module.search(kb_id, v, top_k=per_query) for v in variants]

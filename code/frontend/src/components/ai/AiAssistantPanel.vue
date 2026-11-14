@@ -16,6 +16,8 @@ import {
   type SelectionInfo,
 } from '../../lib/issueMarks'
 import { askKb, rewriteSelection, type KbCitation } from '../../lib/kbClient'
+import { diffChars, summarizeDiff, type DiffSegment } from '../../lib/diff'
+import { captureRange, rangeAlive, replaceRange, replaceSelection, restoreRange } from '../../lib/editorEdit'
 
 /**
  * AI 助手浮层（懒加载 chunk）。
@@ -34,6 +36,10 @@ interface Turn {
   kbAnswer?: string
   citations?: KbCitation[]
   candidate?: string
+  /** 改写前的原文（用于 diff 对比） */
+  source?: string
+  /** 生成时保存的选区范围；用户中途点别处也不会替换错位置 */
+  range?: Range | null
   changes?: { type: string; from: string; to: string; note?: string }[]
   hint?: string
 }
@@ -53,8 +59,34 @@ const checking = ref(false)
 const report = ref<ImproveReport | null>(null)
 const checkError = ref('')
 const selection = ref<SelectionInfo | null>(null)
+/** 侧栏三档：问答 / 检查 / 改写 */
+type PanelTab = 'chat' | 'check' | 'rewrite'
+// 首次打开直接落在「检查」：这是最能让新用户立刻看到价值的入口
+const tab = ref<PanelTab>('check')
+const TABS: { id: PanelTab; label: string }[] = [
+  { id: 'chat', label: '问答' },
+  { id: 'check', label: '检查' },
+  { id: 'rewrite', label: '改写' },
+]
+/** 改写用的文体（空=自动判定） */
+const genre = ref('')
+const GENRES = [
+  { v: '', label: '自动判定' },
+  { v: 'gongwen', label: '公文' },
+  { v: 'lab', label: '实验报告' },
+  { v: 'thesis', label: '论文' },
+  { v: 'expository', label: '说明文' },
+]
 /** 正文里当前标了多少处 */
 const marked = ref(0)
+let noticeTimer: number | null = null
+function flashNotice(text: string) {
+  notice.value = text
+  if (noticeTimer) window.clearTimeout(noticeTimer)
+  noticeTimer = window.setTimeout(() => {
+    notice.value = ''
+  }, 4000)
+}
 
 function clearMarks() {
   clearAllMarks()
@@ -103,6 +135,7 @@ async function askKnowledgeBase() {
 /** 专业改写：用当前选区 + 前后文（T6） */
 async function rewriteCurrentSelection() {
   const sel = selection.value ?? currentSelection()
+  const savedRange = captureRange()
   if (!activeDoc.value || busy.value || inFlight) return
   if (!sel || sel.text.length < 10) {
     notice.value = '请先在正文里选中要改写的段落（至少 10 字）'
@@ -117,6 +150,8 @@ async function rewriteCurrentSelection() {
     status: 'loading',
     seconds: 0,
     mode: 'rewrite',
+    source: sel.text,
+    range: savedRange,
   }
   turns.value = [...turns.value, turn]
   scrollToBottom()
@@ -126,7 +161,7 @@ async function rewriteCurrentSelection() {
     turn.seconds += 1
   }, 1000)
   try {
-    const res = await rewriteSelection(sel.text, { context: sel.context })
+    const res = await rewriteSelection(sel.text, { context: sel.context, genre: genre.value || undefined })
     if (!res.ok) {
       turn.status = 'error'
       turn.error = { message: res.reason || '改写被拒绝', retryable: false }
@@ -144,6 +179,41 @@ async function rewriteCurrentSelection() {
     stopWaiting()
     busy.value = false
     scrollToBottom()
+  }
+}
+
+/** 当前选区的 diff 片段（原文 vs 改写） */
+function diffOf(turn: Turn): DiffSegment[] {
+  if (!turn.source || turn.candidate === undefined) return []
+  return diffChars(turn.source, turn.candidate)
+}
+
+function diffStat(turn: Turn): { added: number; removed: number } {
+  return summarizeDiff(diffOf(turn))
+}
+
+/** 一键替换：把改写结果写回正文当前选区（进撤销栈） */
+function applyRewrite(turn: Turn) {
+  if (turn.candidate === undefined) return
+
+  // ① 优先用「生成时」的那段范围：用户中途点了别处也能替换对位置
+  let res: { ok: boolean; message: string }
+  if (rangeAlive(turn.range ?? null) && turn.range) {
+    restoreRange(turn.range)
+    res = replaceRange(turn.range, turn.candidate)
+  } else {
+    // ② 兜底：用当前选区（Range 已失效时）
+    res = replaceSelection(turn.candidate)
+    if (!res.ok) {
+      res = { ok: false, message: '原文位置已变化，请重新选中要替换的段落后再改写' }
+    }
+  }
+
+  flashNotice(res.message)
+  if (res.ok) {
+    marked.value = 0
+    turn.range = null
+    selection.value = currentSelection()
   }
 }
 
@@ -334,19 +404,7 @@ watch(aiPanelOpen, (open) => {
 
 <template>
   <div>
-    <!-- 悬浮入口：与侧栏共用同一个开关 -->
-    <button
-      v-if="!aiPanelOpen"
-      type="button"
-      aria-label="打开 AI 助手"
-      class="lo-press fixed bottom-5 right-5 z-40 flex h-[46px] w-[46px] items-center justify-center rounded-full text-white shadow-[0_10px_28px_-8px_rgba(10,132,255,0.75)]"
-      style="background-image: linear-gradient(135deg, #0a84ff 0%, #5e5ce6 100%)"
-      @click="aiPanelOpen = true"
-    >
-      <AppIcon name="sparkles" class="h-5 w-5" :stroke-width="1.8" />
-    </button>
-
-    <!-- 面板 -->
+    <!-- 面板（入口在左侧导航「AI 助手」，这里不再放悬浮按钮） -->
     <section
       v-if="aiPanelOpen"
       aria-label="AI 助手"
@@ -396,24 +454,144 @@ watch(aiPanelOpen, (open) => {
         当前离线，AI 需联网；本地功能不受影响
       </p>
 
+      <!-- 三档工具栏 -->
+      <nav class="flex shrink-0 items-center gap-1 border-b border-white/[0.06] px-3 py-1.5">
+        <button
+          v-for="t in TABS"
+          :key="t.id"
+          type="button"
+          class="rounded-full px-2.5 py-1 text-[11.5px] transition-colors"
+          :class="tab === t.id ? 'bg-[#0A84FF]/20 text-[#6FB6FF]' : 'text-[#98989D] hover:bg-white/[0.06] hover:text-[#F5F5F7]'"
+          @click="tab = t.id"
+        >
+          {{ t.label }}
+        </button>
+        <span v-if="marked > 0" class="ml-auto text-[10.5px] text-[#30D158]">正文已标 {{ marked }} 处</span>
+      </nav>
+
       <div ref="listRef" class="thin-scroll min-h-0 flex-1 overflow-y-auto px-4 py-3">
-        <!-- 检查报告 -->
-        <div v-if="checkError" class="mb-3 rounded-[12px] border border-[#FF453A]/40 bg-[#FF453A]/10 px-3 py-2">
-          <p class="text-[12px] text-[#FF8A84]">{{ checkError }}</p>
-          <button class="mt-1 text-[11.5px] text-[#0A84FF]" type="button" @click="checkDoc()">重试</button>
-        </div>
-        <div v-else-if="report" class="mb-3">
-          <div class="mb-2 flex items-center justify-between">
-            <span class="text-[11px] uppercase tracking-wide text-[#636366]">文档检查</span>
-            <button type="button" class="text-[11px] text-[#0A84FF]" @click="report = null">收起</button>
+        <!-- ===== 检查档 ===== -->
+        <div v-if="tab === 'check'" class="flex flex-col gap-3">
+          <div class="flex items-center gap-2">
+            <button
+              type="button"
+              class="lo-press rounded-full bg-[#0A84FF] px-3 py-1.5 text-[12px] font-medium text-white disabled:opacity-40"
+              :disabled="!activeDoc || checking"
+              @click="checkDoc()"
+            >
+              {{ checking ? '检查中…' : report ? '重新检查' : '检查这份文档' }}
+            </button>
+            <button
+              v-if="marked > 0"
+              type="button"
+              class="rounded-full border border-white/[0.08] px-2.5 py-1 text-[11px] text-[#98989D] hover:text-[#F5F5F7]"
+              @click="clearMarks()"
+            >
+              清除正文标记
+            </button>
           </div>
-          <DocCheckReport :report="report" />
+          <p v-if="!report && !checkError" class="text-[12px] leading-relaxed text-[#98989D]">
+            检查结构、数据、表达、体例四类问题，结果会直接标在正文里（左侧色条 + 编号）。
+          </p>
+          <div v-if="checkError" class="rounded-[12px] border border-[#FF453A]/40 bg-[#FF453A]/10 px-3 py-2">
+            <p class="text-[12px] text-[#FF8A84]">{{ checkError }}</p>
+            <button class="mt-1 text-[11.5px] text-[#0A84FF]" type="button" @click="checkDoc()">重试</button>
+          </div>
+          <DocCheckReport v-else-if="report" :report="report" />
         </div>
 
+        <!-- ===== 改写档 ===== -->
+        <div v-else-if="tab === 'rewrite'" class="flex flex-col gap-3">
+          <div v-if="selection" class="rounded-[12px] border border-[#30D158]/30 bg-[#30D158]/[0.06] p-3">
+            <p class="mb-1 text-[11px] text-[#30D158]">选中的正文（{{ selection.text.length }} 字）</p>
+            <p class="max-h-24 overflow-y-auto text-[12px] leading-relaxed text-[#D9D9DE]">{{ selection.text }}</p>
+          </div>
+          <p v-else class="rounded-[12px] bg-[#1F1F21] px-3 py-2 text-[12px] leading-relaxed text-[#98989D]">
+            还没选中正文。到左边文档里划选一段（至少 10 字），这里就会出现内容。
+          </p>
+
+          <div class="flex items-center gap-2">
+            <span class="text-[11.5px] text-[#636366]">文体</span>
+            <select
+              v-model="genre"
+              class="rounded-[8px] border border-white/[0.08] bg-[#1F1F21] px-2 py-1 text-[11.5px] text-[#F5F5F7] outline-none"
+            >
+              <option v-for="g in GENRES" :key="g.v" :value="g.v">{{ g.label }}</option>
+            </select>
+          </div>
+
+          <button
+            type="button"
+            class="lo-press rounded-full bg-[#0A84FF] px-3 py-1.5 text-[12px] font-medium text-white disabled:opacity-40"
+            :disabled="!selection || busy"
+            @click="rewriteCurrentSelection()"
+          >
+            {{ busy ? '生成中…' : '按规范改写这段' }}
+          </button>
+
+          <template v-for="turn in turns.filter((t) => t.mode === 'rewrite').slice(-1)" :key="turn.id">
+            <div v-if="turn.status === 'loading'" class="text-[12px] text-[#98989D]">正在改写… {{ turn.seconds }} 秒</div>
+            <div v-else-if="turn.candidate !== undefined" class="flex flex-col gap-2">
+              <!-- diff 对比：红=删，绿=增 -->
+              <div class="rounded-[12px] bg-[#1F1F21] p-3">
+                <div class="mb-1.5 flex items-center justify-between">
+                  <span class="text-[11px] text-[#636366]">改写对比</span>
+                  <span class="text-[10.5px] text-[#636366]">
+                    删 {{ diffStat(turn).removed }} 字 / 增 {{ diffStat(turn).added }} 字
+                  </span>
+                </div>
+                <p class="whitespace-pre-wrap text-[13px] leading-relaxed text-[#F5F5F7]">
+                  <span
+                    v-for="(seg, i) in diffOf(turn)"
+                    :key="i"
+                    :class="
+                      seg.type === 'del'
+                        ? 'bg-[#FF453A]/20 text-[#FF8A84] line-through'
+                        : seg.type === 'ins'
+                          ? 'bg-[#30D158]/20 text-[#7BE495]'
+                          : ''
+                    "
+                    >{{ seg.text }}</span
+                  >
+                </p>
+              </div>
+
+              <div v-if="turn.changes?.length" class="flex flex-col gap-1">
+                <p class="text-[11px] text-[#636366]">术语/格式改动（{{ turn.changes.length }} 处）</p>
+                <p v-for="(c, i) in turn.changes" :key="i" class="text-[11.5px] text-[#98989D]">
+                  · {{ c.type }}：{{ c.from }} → {{ c.to }}<span v-if="c.note">（{{ c.note }}）</span>
+                </p>
+              </div>
+
+              <div class="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  class="lo-press rounded-full bg-[#0A84FF] px-3 py-1 text-[11.5px] font-medium text-white"
+                  @click="applyRewrite(turn)"
+                >
+                  替换选中
+                </button>
+                <button
+                  type="button"
+                  class="rounded-full bg-[#3A3A3C] px-2.5 py-1 text-[11px] text-[#F5F5F7] hover:bg-[#48484A]"
+                  @click="copyCandidate(turn.candidate ?? '')"
+                >
+                  复制
+                </button>
+                <span class="text-[11px] text-[#636366]">{{ turn.hint }}</span>
+              </div>
+              <p class="text-[11px] text-[#636366]">替换后可 Ctrl+Z 撤销，不会动其它段落</p>
+            </div>
+            <p v-else-if="turn.error" class="text-[12px] text-[#FF8A84]">{{ turn.error.message }}</p>
+          </template>
+        </div>
+
+        <!-- ===== 问答档 ===== -->
+        <template v-else>
         <!-- 空状态：3 条示例 -->
-        <div v-if="!turns.length && !report" class="flex flex-col gap-2">
+        <div v-if="!turns.filter((t) => t.mode !== 'rewrite').length && !report" class="flex flex-col gap-2">
           <p class="text-[12px] leading-relaxed text-[#98989D]">
-            问点什么，AI 会先读当前文档再回答；点「检查」会把问题直接标在正文里。
+            想快点看到效果？直接在「检查」档点一下按钮，问题会标在正文左侧，点建议能跳到对应段落。
           </p>
           <button
             v-for="example in EXAMPLES"
@@ -573,12 +751,18 @@ watch(aiPanelOpen, (open) => {
           </div>
         </div>
 
-        <p v-if="notice" class="mt-1 rounded-[12px] border border-[#FF9F0A]/20 bg-[#FF9F0A]/[0.08] px-3 py-2 text-[12px] text-[#FFB340]">
+        </template>
+
+        <!-- 全局提示：三档共用（替换成功、复制失败等） -->
+        <p
+          v-if="notice"
+          class="mt-2 rounded-[12px] border border-[#30D158]/30 bg-[#30D158]/[0.08] px-3 py-2 text-[12px] text-[#7BE495]"
+        >
           {{ notice }}
         </p>
       </div>
 
-      <footer class="shrink-0 border-t border-white/[0.06] p-3">
+      <footer v-if="tab === 'chat'" class="shrink-0 border-t border-white/[0.06] p-3">
         <div class="flex items-end gap-2">
           <input
             v-model="draft"

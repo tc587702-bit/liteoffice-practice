@@ -70,8 +70,38 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   }
 }
 
+/**
+ * 默认知识库 id。
+ *
+ * ⚠️ 不要写死 'lab'：既有 lab 库（25 份公文）已迁移到 'gongwen'，
+ * 而 'lab' 在文体判定里指实验报告，现对应库 id 是 'lab_report'。
+ * 这里给 'gongwen' 只是兜底；正确做法是按文体路由，见 kbIdForGenre()。
+ */
+export const DEFAULT_KB_ID = 'gongwen'
+
+/** 文体 → 库 id（与后端 app/multigenre.py 的 GENRE_KB 保持一致，新增文体须同步两边） */
+export const GENRE_KB: Record<string, string> = {
+  gongwen: 'gongwen',
+  lab: 'lab_report',
+  thesis: 'thesis',
+  essay_arg: 'essay_arg',
+  essay_narr: 'essay_narr',
+  expository: 'expository',
+  contract: 'contract',
+  resume: 'resume',
+  news: 'news',
+  legal: 'legal',
+  textbook: 'textbook',
+}
+
+/** 按文体取库 id；文体未知时回落到默认库 */
+export function kbIdForGenre(genre?: string | null): string {
+  if (!genre) return DEFAULT_KB_ID
+  return GENRE_KB[genre] ?? DEFAULT_KB_ID
+}
+
 /** 知识库问答（T5：带上当前文档做双源检索） */
-export function askKb(question: string, html: string, kbId = 'lab'): Promise<KbQaResult> {
+export function askKb(question: string, html: string, kbId = DEFAULT_KB_ID): Promise<KbQaResult> {
   return post<KbQaResult>(`/v1/kb/${kbId}/qa`, { question, topK: 5, html })
 }
 
@@ -80,7 +110,8 @@ export function rewriteSelection(
   selection: string,
   options: { genre?: string; context?: string; kbId?: string } = {},
 ): Promise<KbRewriteResult> {
-  const kbId = options.kbId ?? 'lab'
+  // 给了 genre 就按文体选库；只给 kbId 用 kbId；都没有则用默认库
+  const kbId = options.kbId ?? kbIdForGenre(options.genre)
   return post<KbRewriteResult>(`/v1/kb/${kbId}/rewrite`, {
     selection,
     genre: options.genre,
