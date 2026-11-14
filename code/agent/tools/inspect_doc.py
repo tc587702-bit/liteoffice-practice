@@ -9,13 +9,17 @@ import sys
 from pathlib import Path
 
 LAB = Path(__file__).resolve().parents[1]
-os.environ["LITEOFFICE_KB_DB"] = str(LAB / "data" / "lab_kb.db")
+os.environ["LITEOFFICE_KB_DB"] = str(LAB / "data" / "kb.db")
 sys.path.insert(0, str(LAB))
 
 from docx import Document
 
 from app import kb
 from app.classify_genre import classify
+from app.multigenre import GENRE_KB
+
+# 本工具体检的是公文 docx；原来指向废弃的 lab_kb.db + "lab" 库
+EVAL_KB = GENRE_KB["gongwen"]
 
 
 def extract(path: Path) -> tuple[str, list[str]]:
@@ -47,7 +51,7 @@ def main() -> int:
         print(f"    {it['label']:<6} {it['score']:.3f}  强={s['strong']} 弱={s['weak']} 格式={s['regex']}")
 
     print("\n=== 是否已在知识库 ===")
-    docs = kb.list_documents("lab")
+    docs = kb.list_documents(EVAL_KB)
     same = [d for d in docs if path.stem[:12] in d["name"] or d["name"][:12] in path.stem]
     if same:
         for d in same:
@@ -57,7 +61,7 @@ def main() -> int:
 
     print("\n=== 检索抽样（针对本文件主题）===")
     for q in ["城乡统筹发展服务中心近期开展了哪些工作", "服务中心的重点任务和推进情况"]:
-        hits = kb.search("lab", q, top_k=2)
+        hits = kb.search(EVAL_KB, q, top_k=2)
         print(f"  问：{q}  命中 {len(hits)}")
         for i, h in enumerate(hits, 1):
             print(f"    {i}. [{h['score']:.2f}] {h['docName'][:34]}  #{h['ord']}")

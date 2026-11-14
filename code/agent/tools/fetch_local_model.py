@@ -7,7 +7,7 @@ from pathlib import Path
 
 os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 
-from huggingface_hub import snapshot_download  # noqa: E402
+from huggingface_hub import snapshot_download
 
 ROOT = Path(r"C:\deepseekharness\liteoffice-ai\code\agent\data\models")
 TARGET = ROOT / "qwen2.5-1.5b-instruct"

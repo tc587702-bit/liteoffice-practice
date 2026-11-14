@@ -38,6 +38,12 @@ from .query_expand import expand, rrf_merge, search_expanded
 # 低置信度阈值：低于它就跨文体并查，而不是赌一个
 ROUTE_MIN_CONFIDENCE = 0.30
 
+# 嵌入器懒加载状态（见 _get_embedder）。torch 与模型是可选依赖，
+# 缺失时置 None 并记录原因，检索退化为纯 BM25 而不是整个模块报错。
+_EMBEDDER: Any = None
+_EMBEDDER_TRIED = False
+_EMBEDDER_ERROR = ""
+
 # 文体 → 知识库 id。
 #
 # ⚠️ 命名撞车警告：现有 build_kb.py 用 KB_ID = "lab" 装了 25 份【公文】，
@@ -617,16 +623,89 @@ def route(query: str, hint_text: str = "", force_genre: str | None = None) -> Ro
 
 # ---------------------------------------------------------------- 查询
 
-def search_genre(genre: str, query: str, top_k: int = 5) -> list[dict[str, Any]]:
-    """
-    在单个文体的库里检索（BM25 + 该文体自己的同义词组）。
+# 提问套话：几乎每条语料里都出现，判定相关性时必须先剔除
+_META_WORDS = (
+    "知识库", "库里", "文档", "文件", "资料", "说说", "讲讲", "请问", "帮我",
+    "看看", "有没有", "什么", "怎么", "如何", "哪些", "一下", "关于",
+)
 
+
+def _relevance_gate(query: str, hits: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    召回之后再拦一道：与问句没有任何词面重叠的命中一律丢掉。
+
+    为什么需要：向量相似度下限从 0.45 降到 0.38 后，换说法的召回率上去了，
+    但无关问题也可能捞到东西，「无命中就拒答」这条行为被破坏。
+    这里不调阈值，而是要求命中至少有一个 2-gram 与问句相同——
+    「火星探测器着陆」与公文库没有任何共同片段，因此会正确返回空。
+    """
+    flat = re.sub(r"[^\u4e00-\u9fa5a-zA-Z0-9]", "", query or "")
+    # 先去掉「知识库/文档/说说」这类提问套话：它们几乎在每条语料里都出现，
+    # 留着会让无关问题也"有词面重叠"，门槛形同虚设。
+    for word in _META_WORDS:
+        flat = flat.replace(word, "")
+    grams = {flat[i : i + 2] for i in range(max(0, len(flat) - 1))}
+    if len(grams) < 2:
+        return hits
+
+    kept: list[dict[str, Any]] = []
+    for h in hits:
+        text = (h.get("text") or "") + (h.get("title") or "")
+        if any(g in text for g in grams):
+            kept.append(h)
+    return kept
+
+
+def _get_embedder() -> Any:
+    """
+    懒加载本地嵌入器；拿不到就返回 None，检索自动退化为纯 BM25。
+
+    不在模块顶层 import：torch/模型是可选依赖，缺了不该让整个 multigenre 无法导入。
+    首次加载约 1 秒，之后走 embed_local 的进程内单例。
+    """
+    global _EMBEDDER, _EMBEDDER_TRIED, _EMBEDDER_ERROR
+    if _EMBEDDER_TRIED:
+        return _EMBEDDER
+    _EMBEDDER_TRIED = True
+    try:
+        from .embed_local import get_embedder
+
+        _EMBEDDER = get_embedder()
+    except Exception as e:  # noqa: BLE001 缺 torch/模型/显存都归这里，检索退化为 BM25 而不是整体失败
+        _EMBEDDER = None
+        _EMBEDDER_ERROR = f"{type(e).__name__}: {e}"
+    return _EMBEDDER
+
+
+def search_genre(
+    genre: str,
+    query: str,
+    top_k: int = 5,
+    use_vector: bool = True,
+) -> list[dict[str, Any]]:
+    """
+    在单个文体的库里检索：BM25（该文体同义词组）∪ 向量 → RRF。
+
+    原来只有 BM25 一路，导致库里 2486 块向量在这个主入口完全用不上，
+    同义改写召回率只有 70%（原词 100%）。接上向量补的就是这个缺口。
+
+    use_vector=False 时退回纯 BM25，用于对比评测。
     返回项带 genre / genreLabel，供跨文体融合后仍能标明来源。
     """
     kb_id = GENRE_KB.get(genre, genre)
     # 该文体没有词表时传空表：expand 只返回原句，自然退化为单次 BM25，不会误用全局词表
     groups = GENRE_SYNONYMS.get(genre, [])
-    hits, _variants = search_expanded(kb, kb_id, query, top_k=top_k, groups=groups)
+
+    emb = _get_embedder() if use_vector else None
+    if emb is not None:
+        from . import embed as embed_mod
+
+        res = embed_mod.hybrid_search(kb_id, query, emb, top_k=top_k, groups=groups)
+        # 检索后再拦一道：与问句毫无词面重叠的命中丢掉（保「无命中就拒答」）
+        hits = _relevance_gate(query, res["hits"])
+    else:
+        hits, _variants = search_expanded(kb, kb_id, query, top_k=top_k, groups=groups)
+
     for h in hits:
         h["genre"] = genre
         h["genreLabel"] = GENRE_LABEL.get(genre, genre)
@@ -866,6 +945,28 @@ def _selftest(samples_path: str | None = None) -> int:
         cross = ask("补偿标准是什么", top_k=5)
         check("跨文体查询不报错", cross.get("ok") is True, cross.get("reason", ""))
         check("返回里有路由说明", bool(cross.get("route", {}).get("reason")), str(cross["route"]["reason"])[:50])
+
+        # 向量接入回归：这三条查询纯 BM25 必然 0 条（词不在语料里），
+        # 只有向量路能召回。若哪天退回纯 BM25 或阈值又被调高，这里立刻失败。
+        print("\n=== 8) 向量路生效（同义改写召回） ===")
+        if _get_embedder() is None:
+            print(f"  SKIP  嵌入器不可用：{_EMBEDDER_ERROR or '未安装 torch/模型'}")
+        else:
+            vec_probes = [("essay_arg", "论点"), ("essay_arg", "论据"), ("essay_narr", "细节描写")]
+            for g, q in vec_probes:
+                if not all_stats()[g]["chunks"]:
+                    print(f"  SKIP  {GENRE_LABEL[g]} 库为空")
+                    continue
+                bm = search_genre(g, q, top_k=3, use_vector=False)
+                hy = search_genre(g, q, top_k=3, use_vector=True)
+                check(f"{GENRE_LABEL[g]}「{q}」向量补回召回", len(hy) > len(bm),
+                      f"纯BM25 {len(bm)} → 混合 {len(hy)}")
+            # 阈值下调不能把无关内容放进来（0.38 的标定前提）
+            for g, q in [("essay_arg", "火星探测器着陆点"), ("essay_narr", "量子纠缠拓扑绝缘体")]:
+                if not all_stats()[g]["chunks"]:
+                    continue
+                hy = search_genre(g, q, top_k=3, use_vector=True)
+                check(f"{GENRE_LABEL[g]} 无关查询仍被挡住「{q}」", len(hy) == 0, f"命中 {len(hy)}")
 
     print(f"\n结果：{'全部通过' if not fails else f'失败 {len(fails)} 项：' + '、'.join(fails)}")
     return len(fails)

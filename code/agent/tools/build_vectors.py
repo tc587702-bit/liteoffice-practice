@@ -21,8 +21,7 @@ import os
 
 os.environ.setdefault("LITEOFFICE_KB_DB", str(ROOT / "data" / "kb.db"))
 
-from app import embed
-from app import kb
+from app import embed, kb
 from app import multigenre as MG
 from app.classify_genre import GENRE_LABEL
 from app.embed_local import get_embedder

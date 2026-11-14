@@ -22,11 +22,21 @@ from pathlib import Path
 from typing import Any
 
 from .classify_genre import GENRE_LABEL, classify
-from .review import _extract_json, _prompt, _sections, _to_issue
+from .review import _extract_json, _sections, _to_issue
 from .tools import strip_tags
 
 MODEL_DIR = Path(__file__).resolve().parents[1] / "data" / "models" / "qwen2.5-1.5b-instruct"
 MAX_NEW_TOKENS = int(os.getenv("LITEOFFICE_LOCAL_MAX_NEW", "512"))
+
+# 1.5B 这类小模型对"自由发挥"的 prompt 很容易输出空 JSON（实测直接返回 {}）。
+# 给一个完整示例后，输出格式的服从度明显提高，这是小模型的常用做法。
+LOCAL_PROMPT = """你是中文编辑，找出下面这段文字里的语病，并给出改写。
+
+示例输入：他把作业写的很工整，然后就开心开心的回家了。
+示例输出：{"issues":[{"level":"must","quote":"作业写的很工整","problem":"「的」应为「得」","why":"动词后接程度补语用「得」","rewrite":"他把作业写得很工整"},{"level":"should","quote":"开心开心","problem":"词语重复","why":"形容词误叠","rewrite":"开开心心"}]}
+
+只输出 JSON，不要解释，不要加代码块。输入：{text}
+输出："""
 
 _model = None
 _tokenizer = None
@@ -106,7 +116,6 @@ def review_local(
 
     if genre is None:
         genre = classify(plain).get("genre")
-    genre_label = GENRE_LABEL.get(genre or "", "文档")
 
     sections = _sections(html, max_sections)
     started = time.time()
@@ -114,7 +123,7 @@ def review_local(
     per_section: list[dict[str, Any]] = []
 
     for sec in sections:
-        prompt = _prompt(genre_label, sec, [])
+        prompt = LOCAL_PROMPT.replace("{text}", sec["text"][:800])
         try:
             raw, cost = _generate(prompt)
         except Exception as exc:  # noqa: BLE001

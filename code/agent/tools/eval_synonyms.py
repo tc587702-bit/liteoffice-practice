@@ -12,16 +12,20 @@ import sys
 from pathlib import Path
 
 LAB = Path(__file__).resolve().parents[1]
-os.environ["LITEOFFICE_KB_DB"] = str(LAB / "data" / "lab_kb.db")
+os.environ["LITEOFFICE_KB_DB"] = str(LAB / "data" / "kb.db")
 sys.path.insert(0, str(LAB))
 
 from app import kb
+from app.multigenre import GENRE_KB
+
+# 原来指向已废弃的 lab_kb.db + "lab" 库，双重失效；统一到主库的公文分库
+EVAL_KB = GENRE_KB["gongwen"]
 
 SRC = LAB / "data" / "eval" / "synonyms.jsonl"
 
 
 def hit_rank(query: str, doc_sub: str, words: list[str], k: int = 3) -> int | None:
-    for i, h in enumerate(kb.search("lab", query, top_k=k), 1):
+    for i, h in enumerate(kb.search(EVAL_KB, query, top_k=k), 1):
         if doc_sub in h["docName"] and any(w in h["text"] for w in words):
             return i
     return None

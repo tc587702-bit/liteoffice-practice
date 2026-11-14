@@ -21,8 +21,11 @@ sys.path.insert(0, str(LAB))
 from docx import Document
 
 from app import kb
+from app.multigenre import GENRE_KB
 
-KB_ID = "lab"
+# 本脚本装的是【公文】。原来写 "lab"，而 multigenre 的 "lab" 指实验报告，
+# 同名不同义曾导致公文被当实验报告范文、评测查空库出 0%。
+KB_ID = GENRE_KB["gongwen"]
 WEB = LAB / "data" / "web" / "gongwen"
 DESKTOP = Path(r"C:\Users\16595\Desktop\朵文件")
 

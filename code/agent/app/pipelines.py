@@ -75,7 +75,12 @@ def retrieve(kb_id: str, query: str, top_k: int = 5) -> tuple[list[dict], list[s
     检索：优先「BM25 + 向量」加权混合，向量不可用时退回 BM25 + 同义扩展。
 
     可关闭混合：设置 LITEOFFICE_RETRIEVAL=bm25；默认 hybrid。
+
+    两条路径最后都过 `_relevance_gate`：向量下限调到 0.38 后召回变宽，
+    若不拦，「火星探测器着陆」这类无关问题也会捞到公文片段，"无命中就拒答"就失效了。
     """
+    from .multigenre import _relevance_gate
+
     mode = os.getenv("LITEOFFICE_RETRIEVAL", "hybrid")
     vectors = 0
     if mode == "hybrid":
@@ -88,7 +93,7 @@ def retrieve(kb_id: str, query: str, top_k: int = 5) -> tuple[list[dict], list[s
         if emb is not None:
             try:
                 out = embed.hybrid_search(kb_id, query, embedder=emb, top_k=top_k + 4)
-                hits = out.get("hits") or []
+                hits = _relevance_gate(query, out.get("hits") or [])
                 if hits:
                     cleaned = [h for h in hits if not _is_noisy(h["text"])]
                     return (cleaned or hits)[:top_k], out.get("variants") or [query]
@@ -98,6 +103,7 @@ def retrieve(kb_id: str, query: str, top_k: int = 5) -> tuple[list[dict], list[s
     hits, variants = search_expanded(kb, kb_id, query, top_k=top_k + 4)
     if not hits:
         hits, variants = kb.search(kb_id, query, top_k=top_k + 4), [query]
+    hits = _relevance_gate(query, hits)
     cleaned = [h for h in hits if not _is_noisy(h["text"])]
     return (cleaned or hits)[:top_k], variants
 

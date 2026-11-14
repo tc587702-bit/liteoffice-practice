@@ -14,7 +14,11 @@ os.environ["LITEOFFICE_KB_DB"] = str(LAB / "data" / "kb.db")
 sys.path.insert(0, str(LAB))
 
 from app import kb
+from app.multigenre import GENRE_KB
 from app.query_expand import expand, search_expanded
+
+# 题目是公文语料；引用映射避免库名再次漂移导致评测静默失效
+EVAL_KB = GENRE_KB["gongwen"]
 
 SYN = LAB / "data" / "eval" / "synonyms.jsonl"
 FULL = LAB / "data" / "eval" / "questions.jsonl"
@@ -29,9 +33,9 @@ def run(rows, use_expand: bool) -> tuple[int, int, float]:
     mrr = 0.0
     for row in rows:
         if use_expand:
-            hits, _ = search_expanded(kb, "lab", row["q"], top_k=3)
+            hits, _ = search_expanded(kb, EVAL_KB, row["q"], top_k=3)
         else:
-            hits = kb.search("lab", row["q"], top_k=3)
+            hits = kb.search(EVAL_KB, row["q"], top_k=3)
         flags = [is_correct(h, row["doc"], row["any"]) for h in hits]
         first = next((i for i, ok in enumerate(flags, 1) if ok), None)
         if first == 1:

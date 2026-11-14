@@ -38,6 +38,17 @@ from .query_expand import search_expanded
 # 一个 kb 内允许的向量维度（写入时记录，检索时校验）
 DEFAULT_DIM = 512
 
+# 混合检索的向量相似度下限。
+#
+# 由 11 个文体库实测标定（22 个相关查询 + 33 个无关查询）：
+#   0.35 → 漏相关 0/22，放进无关 7/33
+#   0.38 → 漏相关 0/22，放进无关 3/33   ← 取这个
+#   0.40 → 漏相关 1/22，放进无关 1/33
+#   0.45 → 漏相关 3/22，放进无关 0/33（原默认值，议论文/记叙文的正确命中被滤掉）
+# bge-small-zh 在 2-3 字中文短查询上分数天然偏低（「论点」0.4467、「细节描写」0.3999），
+# 用 0.45 会把它们全判成「无命中」。改这个值前请重新跑分布标定，别凭感觉调。
+MIN_SIM_DEFAULT = 0.38
+
 
 # ---------------------------------------------------------------- 向量编解码
 
@@ -368,18 +379,20 @@ def hybrid_search(
     top_k: int = 5,
     per_side: int = 10,
     weights: tuple[float, float] = (1.0, 0.2),
-    min_sim: float = 0.45,
+    min_sim: float = MIN_SIM_DEFAULT,
+    groups: list[list[str]] | None = None,
 ) -> dict[str, Any]:
     """
     混合检索：BM25（带同义扩展）∪ 向量 → RRF 融合。
 
-    · BM25 侧走 search_expanded，复用 query_expand.py 的 18 组领域同义词
+    · BM25 侧走 search_expanded；groups 传入时用该文体自己的同义词组。
+      多文体场景必须传，否则会用全局词表，把「绿色工厂」等外域词混进来。
     · 向量侧用原始 query（语义召回本身就能覆盖同义改写，再扩展只增加成本）
     · 融合复用现成的 rrf_merge，两路分数不可比的问题由「排名」绕开
 
     embedder 为 None 时自动退化为纯 BM25，返回里标明 fallback 原因。
     """
-    bm25_hits, variants = search_expanded(kb, kb_id, query, top_k=per_side)
+    bm25_hits, variants = search_expanded(kb, kb_id, query, top_k=per_side, groups=groups)
 
     vec_hits: list[dict[str, Any]] = []
     fallback = ""
@@ -390,7 +403,18 @@ def hybrid_search(
         if qvecs:
             vec_hits = vector_search(kb_id, qvecs[0], top_k=per_side, min_sim=min_sim)
         if not vec_hits:
-            fallback = "向量路无命中（可能还没建向量）"
+            # 区分「没建向量」和「建了但都低于阈值」——两者处置完全不同。
+            # 原来一律说「可能还没建向量」，把阈值问题误导向重建向量，白跑一遍。
+            vs = vector_stats(kb_id)
+            if not vs["embedded"]:
+                fallback = "向量路无命中：该库还没有向量（先跑 tools/build_vectors.py）"
+            else:
+                top = vector_search(kb_id, qvecs[0], top_k=1, min_sim=0.0) if qvecs else []
+                best = f"{top[0]['score']:.4f}" if top else "-"
+                fallback = (
+                    f"向量路无命中：已有 {vs['embedded']}/{vs['total']} 块向量，"
+                    f"但最高相似度 {best} 低于阈值 {min_sim}"
+                )
 
     fused = _weighted_rrf([bm25_hits, vec_hits], list(weights), top_k) if (bm25_hits and vec_hits) else (bm25_hits or vec_hits)[:top_k]
 

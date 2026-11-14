@@ -17,6 +17,11 @@ os.environ["LITEOFFICE_KB_DB"] = str(LAB / "data" / "kb.db")
 sys.path.insert(0, str(LAB))
 
 from app import kb
+from app.multigenre import GENRE_KB
+
+# 这 22 题问的是公文语料。公文原在 "lab" 库，已迁到 "gongwen"；
+# 这里引用映射而不是写死字符串，避免下次改库名时评测又静默变成 0%。
+EVAL_KB = GENRE_KB["gongwen"]
 
 QUESTIONS = LAB / "data" / "eval" / "questions.jsonl"
 
@@ -36,7 +41,7 @@ def main() -> int:
     details = []
 
     for row in rows:
-        hits = kb.search("lab", row["q"], top_k=3)
+        hits = kb.search(EVAL_KB, row["q"], top_k=3)
         flags = [is_correct(h, row["doc"], row["any"]) for h in hits]
         first = next((i for i, ok in enumerate(flags, 1) if ok), None)
         if first == 1:
@@ -49,7 +54,12 @@ def main() -> int:
         details.append((row["q"], first, [h["docName"][:26] for h in hits[:3]]))
 
     n = len(rows)
-    print(f"题目数：{n}   语料：{kb.kb_stats('lab')['documents']} 份 / {kb.kb_stats('lab')['chunks']} 块\n")
+    stat = kb.kb_stats(EVAL_KB)
+    print(f"题目数：{n}   语料库：{EVAL_KB}   {stat['documents']} 份 / {stat['chunks']} 块")
+    if not stat["chunks"]:
+        # 空库跑出的 0% 是配置错误，不是检索能力差；必须显式报警而不是静默出分
+        print(f"  ⚠️ 库 {EVAL_KB} 是空的，本次指标无意义（检查库名或先建库）")
+    print()
     print("=== 明细 ===")
     for q, first, names in details:
         mark = "OK  " if first == 1 else ("TOP3" if first else "MISS")

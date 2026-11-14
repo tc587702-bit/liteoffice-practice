@@ -13,6 +13,9 @@ os.environ["LITEOFFICE_KB_DB"] = str(LAB / "data" / "kb.db")
 sys.path.insert(0, str(LAB))
 
 from app import kb
+from app.multigenre import GENRE_KB
+
+EVAL_KB = GENRE_KB["gongwen"]
 
 QUERIES = [
     "绿色工厂推荐的申报条件是什么",
@@ -24,7 +27,7 @@ QUERIES = [
 ]
 
 for q in QUERIES:
-    hits = kb.search("lab", q, top_k=3)
+    hits = kb.search(EVAL_KB, q, top_k=3)
     print("=" * 70)
     print(f"问：{q}   命中 {len(hits)} 条")
     for i, h in enumerate(hits, 1):
