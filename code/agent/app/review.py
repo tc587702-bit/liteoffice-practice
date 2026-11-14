@@ -19,14 +19,13 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from typing import Any
 
 from . import docmap
 from .classify_genre import GENRE_LABEL, classify
-from .llm import DEFAULT_MODEL, complete, has_credentials
-
-import os
+from .llm import complete, has_credentials
 from .tools import split_blocks, strip_tags
 
 MAX_CHARS_PER_SECTION = 1200

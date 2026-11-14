@@ -221,12 +221,12 @@ def check_table_header(model: dict[str, Any]) -> list[dict[str, Any]]:
     for tbl in model["tables"]:
         idx = model["blocks"].index(tbl)
         # 表格纯文本是拼接的（没有分隔符），必须回到 HTML 里按单元格取首行
-        rows = re.findall(r"<tr[^>]*>([\s\S]*?)</tr>", getattr(tbl, "html", "") or "", re.I)
+        rows = re.findall(r"<tr[^>]*>([\s\S]*?)</tr>", getattr(tbl, "html", "") or "", re.IGNORECASE)
         if not rows:
             continue
         cells = [
             re.sub(r"<[^>]+>", "", c).strip()
-            for c in re.findall(r"<t[dh][^>]*>([\s\S]*?)</t[dh]>", rows[0], re.I)
+            for c in re.findall(r"<t[dh][^>]*>([\s\S]*?)</t[dh]>", rows[0], re.IGNORECASE)
         ]
         cells = [c for c in cells if c]
         if not cells:
@@ -293,26 +293,312 @@ def check_percent_base(model: dict[str, Any]) -> list[dict[str, Any]]:
     return issues[:2]
 
 
+# ---------------------------------------------------------------- 第二批检查器
+
+# 裸数字（无单位）也要参与"前后矛盾"比对：
+# 「检查企业 3682」与「规模以上企业 3510 家」是同一指标，若只比对带单位的数字就会漏。
+_BARE_NUM_RE = re.compile(r"(\d{2,}(?:\.\d+)?)")
+
+
+def check_bare_number_conflict(model: dict[str, Any]) -> list[dict[str, Any]]:
+    """同一指标：一处带单位、一处裸数字，也可能矛盾"""
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for idx, blk in enumerate(model["blocks"]):
+        if blk.type == "table":
+            continue
+        for m in _BARE_NUM_RE.finditer(blk.text):
+            tail = blk.text[m.end() : m.end() + 3].lstrip()
+            if tail[:1] in "%％" or re.match(r"[.、）)]", tail):
+                continue
+            if re.match(r"(万平方米|平方米|万人|万户|万元|亿元|万张|个|人|户|张|家|处|所|亩|元)", tail):
+                continue  # 带单位的交给 check_number_conflict
+            label = re.sub(r"[^\u4e00-\u9fa5]", "", blk.text[max(0, m.start() - 10) : m.start()])[-4:]
+            if len(label) < 2:
+                continue
+            groups.setdefault(label, []).append({"raw": m.group(1), "block": idx})
+
+    issues: list[dict[str, Any]] = []
+    for label, items in groups.items():
+        values = {i["raw"] for i in items}
+        if len(values) < 2:
+            continue
+        first, last = items[0], items[-1]
+        issues.append(
+            _issue(
+                "warning",
+                f"第 {first['block'] + 1} 段与第 {last['block'] + 1} 段",
+                f"「{label}」数字可能不一致",
+                f"同一处出现 {first['raw']} 与 {last['raw']}，其中一个还没带单位，读者无法核对",
+                "统一口径并给数字补上单位；若确实是两个不同指标，请把指标名写清楚",
+                last["block"],
+            )
+        )
+    return issues[:2]
+
+
+# 时间线矛盾：句子里同时出现两个年份，且拿前一年的节点去完成后一年度的任务
+_YEAR = r"(20\d{2})"
+_TIMELINE_RE = re.compile(rf"{_YEAR}\s*年[^。；]{{0,20}}(完成|开展|实现|启动)[^。；]{{0,20}}{_YEAR}\s*年度")
+
+
+def check_timeline(model: dict[str, Any]) -> list[dict[str, Any]]:
+    issues: list[dict[str, Any]] = []
+    for idx, blk in enumerate(model["blocks"]):
+        if blk.type == "table":
+            continue
+        for m in _TIMELINE_RE.finditer(blk.text):
+            y1, y2 = int(m.group(1)), int(m.group(3))
+            if y1 < y2:
+                issues.append(
+                    _issue(
+                        "warning",
+                        f"第 {idx + 1} 段",
+                        "时间线矛盾",
+                        f"要用 {y1} 年的节点完成 {y2} 年度任务，逻辑上说不通",
+                        "把年份与任务年度对齐，或改成「提前启动」这类表述",
+                        idx,
+                    )
+                )
+                break
+    return issues
+
+
+def check_attachment(model: dict[str, Any]) -> list[dict[str, Any]]:
+    """正文提到"附件 N"但文末没有附件说明"""
+    full = "\n".join(b.text for b in model["blocks"] if b.type != "table")
+    refs = re.findall(r"附件\s*[0-9一二三四五六七八九十]+", full)
+    if not refs:
+        return []
+    tail = full[-200:]
+    has_list = bool(re.search(r"(附[件表]\s*[:：]|附件[0-9一二三四五六七八九十]+\s*[：:])", tail))
+    if has_list:
+        return []
+    last_block = max(0, len(model["blocks"]) - 1)
+    return [
+        _issue(
+            "info",
+            "文末",
+            "正文引用了附件，但文末没有附件说明",
+            f"文中出现 {refs[0]}，读者找不到对应附件",
+            "在文末补「附件：1.××台账 2.××清单」，或删掉正文里的附件引用",
+            last_block,
+        )
+    ]
+
+
+_ORG_RE = re.compile(r"[\u4e00-\u9fa5]{2,5}(?:局|委|办|中心)")
+
+
+def check_org_name(model: dict[str, Any]) -> list[dict[str, Any]]:
+    """同一机构出现两种简称（应急局 / 应急管理局）"""
+    names: dict[str, set[str]] = {}
+    blocks_by_name: dict[str, int] = {}
+    for idx, blk in enumerate(model["blocks"]):
+        if blk.type == "table":
+            continue
+        for m in _ORG_RE.finditer(blk.text):
+            name = m.group(0)
+            key = name[:2]
+            names.setdefault(key, set()).add(name)
+            blocks_by_name.setdefault(name, idx)
+
+    issues: list[dict[str, Any]] = []
+    for key, variants in names.items():
+        if len(variants) < 2:
+            continue
+        # 过滤掉"同前缀但确实是不同机构"的情况：只报一个是另一个的子串
+        pair = sorted(variants, key=len)
+        for i in range(len(pair)):
+            for j in range(i + 1, len(pair)):
+                if pair[i] in pair[j] and len(pair[i]) >= 3:
+                    idx = blocks_by_name.get(pair[j], blocks_by_name.get(pair[i], 0))
+                    issues.append(
+                        _issue(
+                            "info",
+                            f"第 {idx + 1} 段",
+                            f"机构名称前后不一致（{pair[i]} / {pair[j]}）",
+                            "同一个机构出现两种写法，公文中应统一使用全称或规范的简称",
+                            "首次出现用全称并注明简称（如「区应急管理局（以下简称区应急局）」），后文统一",
+                            idx,
+                        )
+                    )
+                    break
+            if issues:
+                break
+        if issues:
+            break
+    return issues
+
+
+# 同一天内的时间顺序（数字越大越晚）
+_DAY_ORDER = {
+    "凌晨": 0, "清晨": 1, "早晨": 1, "早上": 1, "上午": 2, "中午": 3,
+    "午后": 4, "下午": 4, "傍晚": 5, "晚上": 6, "半夜": 7, "深夜": 7,
+}
+# 这些词出现说明跨了一天，时间顺序重新开始
+_NEW_DAY = re.compile(r"第二天|次日|翌日|第三天|几天后|一周后|回家那天|开学")
+# 这些词说明是回忆/插叙，不参与顺序判断
+_FLASHBACK = re.compile(r"记得|回忆|那时候|那年|当年|小时候|从前|以前|前一天|昨夜|前一天晚上")
+
+
+def check_narrative_timeline(model: dict[str, Any]) -> list[dict[str, Any]]:
+    """
+    记叙文的时间线倒序检查。
+
+    只在"同一段内、且没有插叙/跨日标记"的情况下判断：
+      · 段落里先写下午、再写早上 → 可疑
+      · 出现"记得/那年" → 视为插叙，跳过
+      · 出现"第二天/几天后" → 跨日，重新计时
+    这样不会把正常的倒叙写法误判成错误。
+    """
+    issues: list[dict[str, Any]] = []
+    for idx, blk in enumerate(model["blocks"]):
+        if blk.type == "table":
+            continue
+        text = blk.text
+        # 整段是回忆 → 跳过
+        if _FLASHBACK.search(text[:30]):
+            continue
+
+        # 按出现顺序收集（时间段, 词）
+        found: list[tuple[int, str, int]] = []
+        for m in re.finditer("|".join(_DAY_ORDER), text):
+            found.append((m.start(), m.group(0), _DAY_ORDER[m.group(0)]))
+        if len(found) < 2:
+            continue
+
+        for i in range(1, len(found)):
+            prev_pos, prev_word, prev_rank = found[i - 1]
+            pos, word, rank = found[i]
+            between = text[prev_pos:pos]
+            if _NEW_DAY.search(between) or _FLASHBACK.search(between):
+                continue  # 跨日或插叙
+            if rank < prev_rank:
+                issues.append(
+                    _issue(
+                        "warning",
+                        f"第 {idx + 1} 段",
+                        f"时间顺序倒了（{prev_word} → {word}）",
+                        "同一段里后写的时间比前面早，读者会以为时间倒流",
+                        "调整叙述顺序；若是回忆，加「记得」「那天早些时候」这类提示词",
+                        idx,
+                    )
+                )
+                break
+    return issues
+
+
+# 常见反义/矛盾描述对（同句共现时多半是笔误或前后矛盾）
+ANTONYM_PAIRS = [
+    ("亮", "暗"), ("亮", "黑"), ("明亮", "昏暗"),
+    ("满", "空"), ("坐满", "空位"), ("拥挤", "空荡"),
+    ("热", "冷"), ("热", "凉"), ("滚烫", "冰凉"), ("烫", "凉"),
+    ("枯萎", "茂盛"), ("凋谢", "盛开"), ("死亡", "茂盛"),
+    ("干燥", "潮湿"), ("晴天", "下雨"),
+    ("增加", "减少"), ("上升", "下降"), ("提高", "降低"),
+    ("成功", "失败"), ("顺利", "失败"), ("完整", "破碎"),
+    ("安静", "吵闹"), ("安静", "响亮"), ("寂静", "喧闹"),
+    ("喜欢", "讨厌"), ("开心", "难过"), ("高兴", "伤心"),
+    ("开始", "结束"), ("出生", "去世"),
+    ("白天", "夜晚"), ("白天", "深夜"), ("中午", "深夜"),
+    ("东边", "西边"), ("南边", "北边"),
+]
+
+# 感叹/程度副词后接"反义"形容词时，最容易出现"又…又…"式自相矛盾
+_SENT_SPLIT = re.compile(r"[。！？；\n]")
+
+
+def check_antonym_conflict(model: dict[str, Any]) -> list[dict[str, Any]]:
+    """
+    同一句里同时出现相反描述。
+
+    例：「彩灯亮晶晶，灯光黑乎乎」「声音安静又响亮」「冰棍越吃越烫」
+    只报 info（可选）：反义词共现有可能是刻意的对比写法，需要人判断。
+    """
+    issues: list[dict[str, Any]] = []
+    for idx, blk in enumerate(model["blocks"]):
+        if blk.type == "table":
+            continue
+        for sent in _SENT_SPLIT.split(blk.text):
+            s = sent.strip()
+            if len(s) < 6:
+                continue
+            hit: tuple[str, str] | None = None
+            for a, b in ANTONYM_PAIRS:
+                if a in s and b in s:
+                    # 排除"从…到…"这类正常表述
+                    if re.search(rf"从.{0,4}{re.escape(a)}.{0,4}到.{0,4}{re.escape(b)}", s):
+                        continue
+                    if re.search(rf"先.{0,6}{re.escape(a)}.{0,6}(再|后).{0,4}{re.escape(b)}", s):
+                        continue
+                    hit = (a, b)
+                    break
+            if hit:
+                issues.append(
+                    _issue(
+                        "info",
+                        f"第 {idx + 1} 段",
+                        f"同一句里出现相反描述（{hit[0]} / {hit[1]}）",
+                        f"「{s[:24]}…」里同时写了 {hit[0]} 和 {hit[1]}，读者会以为写错了",
+                        "确认是否为笔误；若想对比，用「先是…随后…」把时间顺序写清楚",
+                        idx,
+                    )
+                )
+                break
+    return issues[:3]
+
+
 CHECKS = (
     check_number_conflict,
+    check_bare_number_conflict,
     check_heading_gap,
     check_numbering_mixed,
     check_duplicate_block,
     check_table_header,
     check_unit_mixed,
     check_percent_base,
+    check_timeline,
+    check_attachment,
+    check_org_name,
 )
 
+# 只在记叙文类文体里跑的检查器
+NARRATIVE_CHECKS = (check_narrative_timeline, check_antonym_conflict)
 
-def analyze(html: str) -> list[dict[str, Any]]:
-    """跑全部一致性检查；返回按严重程度排序的问题（无跳转的排后面）"""
+
+def analyze(html: str, genre: str | None = None) -> list[dict[str, Any]]:
+    """
+    跑一致性检查。
+
+    genre 为记叙文类（essay_narr 等）时，改用 NARRATIVE_CHECKS：
+    记叙文没有编号体系与公文抬头，套公文检查只会产生噪音。
+    """
+    _failed: list[str] = []
     model = _model(html)
+    is_narrative = (genre or "").startswith("essay") or genre in ("expository",)
+    checks = NARRATIVE_CHECKS if is_narrative else CHECKS
     issues: list[dict[str, Any]] = []
-    for check in CHECKS:
+    for check in checks:
         try:
             issues.extend(check(model))
         except Exception:  # noqa: BLE001 单个检查器抛错不应影响其它检查
+            # 记下是哪个检查器失败：出问题时能定位，而不是静默跳过
+            _failed.append(check.__name__)
+    # 同一问题重复出现（例如整段重复时两段各报一次）只留第一条
+    seen: set[str] = set()
+    uniq: list[dict[str, Any]] = []
+    for it in issues:
+        if it["problem"] in seen:
             continue
+        seen.add(it["problem"])
+        uniq.append(it)
+
+    if _failed:
+        issues.insert(0, _issue(
+            "info", "全文", f"{len(_failed)} 个检查器未执行完成",
+            "检查器内部异常，本次结果可能不完整", "记录日志后重试；若持续出现请反馈", None,
+        ))
+
     order = {"error": 0, "warning": 1, "info": 2}
-    issues.sort(key=lambda x: (order.get(x["level"], 3), x["block"] is None))
-    return issues
+    uniq.sort(key=lambda x: (order.get(x["level"], 3), x["block"] is None))
+    return uniq

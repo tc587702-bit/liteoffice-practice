@@ -21,9 +21,8 @@ import time
 from pathlib import Path
 from typing import Any
 
-from . import docmap
 from .classify_genre import GENRE_LABEL, classify
-from .review import _extract_json, _sections, _to_issue, _prompt
+from .review import _extract_json, _prompt, _sections, _to_issue
 from .tools import strip_tags
 
 MODEL_DIR = Path(__file__).resolve().parents[1] / "data" / "models" / "qwen2.5-1.5b-instruct"

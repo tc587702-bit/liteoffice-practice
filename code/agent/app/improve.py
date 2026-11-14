@@ -442,6 +442,17 @@ def _dims_of(groups: dict[str, list[dict]], labels: dict[str, str]) -> dict[str,
     return dims
 
 
+OFFICIAL_MARKERS = re.compile(
+    r"关于|现将|特此|此致|收悉|遵照|请示|报告如下|汇报如下|贯彻落实|"
+    r"我区|我县|我市|我局|我区将|领导小组|印发|抄送|工作总结|实施方案"
+)
+
+
+def _looks_official(text: str) -> bool:
+    """粗判是否公文：命中 2 个以上公文标记才算，避免记叙文误伤"""
+    return len(OFFICIAL_MARKERS.findall(text or "")) >= 2
+
+
 def _attach_blocks(issues: list[dict], html: str, plain: str) -> None:
     """
     给语病问题补 block（跳转目标）。
@@ -544,7 +555,11 @@ def analyze(html: str, genre: str | None = None) -> dict[str, Any]:
     if genre is None:
         judged = classify(plain)
         genre = judged.get("genre")
-    is_gongwen = genre in (None, "gongwen")
+
+    # 判不出文体（genre=None）时不能默认按公文查：
+    # 一篇 130 字的记叙文被套上"缺现状/缺措施/缺抬头"三条硬要求，
+    # 用户看到的就是"AI 完全不懂"。只有出现公文特征才按公文处理。
+    is_gongwen = genre == "gongwen" or (genre is None and _looks_official(plain))
 
     dm = docmap.build(html)
     doc_stats = {"sections": len(dm.sections), "blocks": dm.block_count, "chars": dm.total_chars}
@@ -562,7 +577,7 @@ def analyze(html: str, genre: str | None = None) -> dict[str, Any]:
         # 一致性层：编号断号、数字前后矛盾、整段重复、表格表头、单位混写、百分比无分母
         from . import consistency
 
-        c_issues = consistency.analyze(html)
+        c_issues = consistency.analyze(html, genre=genre)
         for it in c_issues:
             it.setdefault("block", None)
 
@@ -582,14 +597,17 @@ def analyze(html: str, genre: str | None = None) -> dict[str, Any]:
             DIM_LABEL,
         )
         clean_msg = "没有发现明显问题，结构和表达都符合公文的常见写法。"
-        genre_label = "公文"
+        genre_label = "公文" if is_gongwen else "通用"
     else:
         g_rep = grammar.analyze(plain)
         issues = g_rep["issues"]
         _attach_blocks(issues, html, plain)
         _add_anchors(issues, html, plain)
         # 语病之外再查可读性：长段落/长句与文体无关
-        prose = check_prose(html)
+        # 记叙文专属一致性检查（时间线）
+        from . import consistency as _cons
+
+        prose = check_prose(html) + _cons.analyze(html, genre=genre)
         for it in prose:
             it.setdefault("block", None)
         dims = {k: v for k, v in g_rep["dims"].items()}

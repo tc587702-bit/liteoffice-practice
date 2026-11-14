@@ -26,10 +26,10 @@ from pydantic import BaseModel, Field
 
 from . import feedback as FEEDBACK
 from . import improve as IMPROVE
-from . import review as REVIEW
-from . import review_local as REVIEW_LOCAL
 from . import kb as KB
 from . import pipelines as PIPE
+from . import review as REVIEW
+from . import review_local as REVIEW_LOCAL
 from .graph import run_agent
 from .llm import complete
 from .llm import info as llm_info

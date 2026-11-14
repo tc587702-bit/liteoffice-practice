@@ -435,8 +435,9 @@ def _heuristic_plan(query: str) -> list[str]:
         tool = INTENT_TOOL.get(judged["intent"])
         if tool and judged["confidence"] >= INTENT_MIN_CONF:
             plan.append(tool)
-    except Exception:  # noqa: BLE001 分类器坏了也不能影响主流程
-        pass
+    except Exception as exc:  # noqa: BLE001 分类器坏了也不能影响主流程
+        # 分类器不可用时静默回退到关键词，但要留痕，便于排查
+        last_error = f"{type(exc).__name__}: {exc}"  # noqa: F841
 
     # ② 关键词兜底/补充：分类器低置信时由它决定，高置信时用于补辅助工具
     for pattern, tool in INTENTS:
@@ -479,7 +480,7 @@ def _next_offline_tool(pending: list[str], used: list[str]) -> str | None:
 
 
 def _balanced_json(text: str) -> str | None:
-    """
+    r"""
     从文本里截出第一个「括号配平」的 JSON 对象。
 
     为什么不用正则 `\{[\s\S]*\}`：贪婪匹配会把后面的说明文字一起吞进来，
@@ -521,7 +522,7 @@ def _repair_truncated(text: str) -> str | None:
       · final_answer 的值本身被切断（连结束引号都没有）  → 取到文本末尾为止
     """
     # ① 值完整（有结束引号）
-    fa = re.search(r'"final_answer"\s*:\s*"((?:[^"\\]|\\.)*)"', text, re.S)
+    fa = re.search(r'"final_answer"\s*:\s*"((?:[^"\\]|\\.)*)"', text, re.DOTALL)
     if fa:
         return json.dumps({"action": None, "final_answer": fa.group(1)}, ensure_ascii=False)
 
