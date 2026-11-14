@@ -24,9 +24,12 @@ from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from .llm import complete, info as llm_info
+from . import improve as IMPROVE
 from . import kb as KB
+from . import pipelines as PIPE
 from .graph import run_agent
+from .llm import complete
+from .llm import info as llm_info
 from .tools import run_tool, tool_manifest
 
 API_TOKEN = os.getenv("LITEOFFICE_API_TOKEN", "")
@@ -86,6 +89,36 @@ async def guard(request: Request, call_next):
 
             return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
     return await call_next(request)
+
+
+# ---------------- 会话级跨轮记忆（只存内存，不落盘） ----------------
+
+_SESSIONS: dict[str, dict[str, Any]] = {}
+SESSION_TTL = 30 * 60          # 30 分钟
+SESSION_LIMIT = 200            # 条目上限
+
+
+def _session_get(session_id: str) -> dict[str, Any] | None:
+    if not session_id:
+        return None
+    rec = _SESSIONS.get(session_id)
+    if not rec:
+        return None
+    if time.time() - rec.get("ts", 0) > SESSION_TTL:
+        _SESSIONS.pop(session_id, None)
+        return None
+    return rec
+
+
+def _session_put(session_id: str, record: dict[str, Any]) -> None:
+    """写入会话记录；超上限时按 ts 淘汰最旧（不存 html，只存摘要）"""
+    if not session_id:
+        return
+    _SESSIONS[session_id] = {**record, "ts": time.time()}
+    if len(_SESSIONS) > SESSION_LIMIT:
+        oldest = sorted(_SESSIONS.items(), key=lambda kv: kv[1].get("ts", 0))
+        for key, _ in oldest[: len(_SESSIONS) - SESSION_LIMIT]:
+            _SESSIONS.pop(key, None)
 
 
 @app.get("/health")
@@ -234,3 +267,53 @@ def kb_list() -> dict[str, Any]:
             }
         ]
     }
+
+# ---------------- 固定链路：问答 / 专业改写 ----------------
+
+class QaPayload(BaseModel):
+    question: str
+    topK: int = 5
+    model: str | None = None
+    html: str = ""          # 当前文档（可选）；为空时只查知识库
+    docTopK: int = 3
+
+
+class RewritePayload(BaseModel):
+    selection: str
+    genre: str | None = None
+    context: str = ""        # 选区前后各 200 字（可选）
+    topK: int = 3
+    model: str | None = None
+
+
+@app.post("/v1/kb/{kb_id}/qa")
+def kb_qa(kb_id: str, payload: QaPayload) -> dict[str, Any]:
+    return PIPE.qa(
+        kb_id,
+        payload.question,
+        model=payload.model,
+        top_k=payload.topK,
+        doc_html=payload.html,
+        doc_top_k=payload.docTopK,
+    )
+
+
+@app.post("/v1/kb/{kb_id}/rewrite")
+def kb_rewrite(kb_id: str, payload: RewritePayload) -> dict[str, Any]:
+    return PIPE.rewrite(
+        kb_id,
+        payload.selection,
+        genre=payload.genre,
+        model=payload.model,
+        top_k=payload.topK,
+        context=payload.context,
+    )
+
+class ImprovePayload(BaseModel):
+    html: str
+
+
+@app.post("/v1/doc/improve")
+def doc_improve_route(payload: ImprovePayload) -> dict[str, Any]:
+    """文档优化建议：分数 + 带位置的问题清单"""
+    return IMPROVE.analyze(payload.html)

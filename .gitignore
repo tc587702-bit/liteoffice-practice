@@ -168,3 +168,11 @@ __pycache__/
 
 # ---- Agent 运行时知识库 ----
 code/agent/data/
+
+# ---- 本地虚拟环境（上传时排除） ----
+.venv/
+venv/
+
+# ---- 抓取/临时产物 ----
+.tmp/
+_scratch/

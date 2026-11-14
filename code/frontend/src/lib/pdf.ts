@@ -15,16 +15,14 @@ import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist'
  */
 let pdfjsLoader: Promise<typeof import('pdfjs-dist')> | null = null
 
-function getPdfjs() {
-  if (!pdfjsLoader) {
-    pdfjsLoader = import('pdfjs-dist').then((mod) => {
-      mod.GlobalWorkerOptions.workerSrc = new URL(
-        'pdfjs-dist/build/pdf.worker.min.mjs',
-        import.meta.url,
-      ).toString()
-      return mod
-    })
-  }
+function getPdfjs(): Promise<typeof import('pdfjs-dist')> {
+  pdfjsLoader ??= import('pdfjs-dist').then((mod) => {
+    mod.GlobalWorkerOptions.workerSrc = new URL(
+      'pdfjs-dist/build/pdf.worker.min.mjs',
+      import.meta.url,
+    ).toString()
+    return mod
+  })
   return pdfjsLoader
 }
 
@@ -63,7 +61,8 @@ export const PDF_MESSAGES = {
 export function classifyPdfError(error: unknown): { code: PdfFailureCode; message: string } {
   const err = error as { name?: string; message?: string } | null
   const name = err?.name ?? ''
-  const detail = String(err?.message ?? error ?? '')
+  // 不能直接 String(error)：非 Error 对象会被序列化成 "[object Object]"
+  const detail = err?.message ?? (typeof error === 'string' ? error : '')
 
   if (name === 'PasswordException' || /password/i.test(detail)) {
     return { code: 'encrypted', message: PDF_MESSAGES.encrypted }
@@ -95,11 +94,12 @@ function itemText(items: unknown[]): string {
 }
 
 function normalize(text: string): string {
-  return text
+  // 逐行去尾部空白：比 /[ \t]+\n/ 更线性，避免回溯
+  const lines = text
     .replace(/\r\n?/g, '\n')
-    .replace(/[ \t]+\n/g, '\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim()
+    .split('\n')
+    .map((line) => (line.endsWith(' ') || line.endsWith('\t') ? line.trimEnd() : line))
+  return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim()
 }
 
 export interface PdfLoadOptions {
@@ -203,24 +203,27 @@ export async function extractPdfText(buffer: ArrayBuffer, options: ExtractOption
       return fail('corrupt', PDF_MESSAGES.corrupt)
     }
 
-    const pages: PdfPageInfo[] = []
-    const chunks: string[] = []
-    for (let index = 1; index <= doc.numPages; index++) {
-      if (options.signal?.aborted) throw new DOMException('aborted', 'AbortError')
-      const page = await doc.getPage(index)
-      const viewport = page.getViewport({ scale: 1 })
-      const content = await page.getTextContent()
-      const raw = itemText(content.items as unknown[])
-      chunks.push(raw)
-      pages.push({
-        index,
-        chars: raw.replace(/\s/g, '').length,
-        width: Math.round(viewport.width),
-        height: Math.round(viewport.height),
-      })
-      page.cleanup()
-      options.onProgress?.(index, doc.numPages)
-    }
+    // 逐页并发读取，不再在 for 循环里 await（顺序由数组下标保证）
+    const pageNumbers = Array.from({ length: doc.numPages }, (_, i) => i + 1)
+    const pageResults = await Promise.all(
+      pageNumbers.map(async (index) => {
+        if (options.signal?.aborted) throw new DOMException('aborted', 'AbortError')
+        const page = await doc.getPage(index)
+        const viewport = page.getViewport({ scale: 1 })
+        const content = await page.getTextContent()
+        const raw = itemText(content.items as unknown[])
+        page.cleanup()
+        options.onProgress?.(index, doc.numPages)
+        return { index, raw, width: Math.round(viewport.width), height: Math.round(viewport.height) }
+      }),
+    )
+    const chunks = pageResults.map((r) => r.raw)
+    const pages: PdfPageInfo[] = pageResults.map((r) => ({
+      index: r.index,
+      chars: r.raw.replace(/\s/g, '').length,
+      width: r.width,
+      height: r.height,
+    }))
 
     const text = normalize(chunks.join('\n\n'))
     const charCount = text.replace(/\s/g, '').length

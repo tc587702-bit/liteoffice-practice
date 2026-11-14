@@ -1,0 +1,631 @@
+<script setup lang="ts">
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { storeToRefs } from 'pinia'
+import { useWorkspaceStore } from '../../stores/workspace'
+import { aiPanelOpen, closeAiPanel } from '../../lib/aiPanelState'
+import { AgentError, runAgent, type AgentRunResult } from '../../lib/agentClient'
+import AppIcon from '../ui/AppIcon.vue'
+import DocCheckReport from './DocCheckReport.vue'
+import { checkDocument, type ImproveReport } from '../../lib/improveClient'
+import {
+  applyIssueMarks,
+  clearAllMarks,
+  currentSelection,
+  markRefs,
+  markRefParagraphs,
+  type SelectionInfo,
+} from '../../lib/issueMarks'
+import { askKb, rewriteSelection, type KbCitation } from '../../lib/kbClient'
+
+/**
+ * AI 助手浮层（懒加载 chunk）。
+ * 只读当前文档的 HTML 发给后端，绝不写文档 / 不压撤销栈。
+ */
+
+interface Turn {
+  id: number
+  question: string
+  status: 'loading' | 'done' | 'error' | 'cancelled'
+  result?: AgentRunResult
+  error?: { message: string; retryable: boolean }
+  seconds: number
+  /** agent = ReAct；kb = 知识库问答（双源）；rewrite = 专业改写 */
+  mode?: 'agent' | 'kb' | 'rewrite'
+  kbAnswer?: string
+  citations?: KbCitation[]
+  candidate?: string
+  changes?: { type: string; from: string; to: string; note?: string }[]
+  hint?: string
+}
+
+const EXAMPLES = ['这份文档有多少字', '检查一下表格和标题有没有问题', '帮我看看有哪些重复段落']
+
+const PHASE_LABEL: Record<string, string> = { think: '想', act: '做', final: '答' }
+
+const store = useWorkspaceStore()
+const { activeDoc } = storeToRefs(store)
+
+const turns = ref<Turn[]>([])
+const draft = ref('')
+const notice = ref('')
+const busy = ref(false)
+const checking = ref(false)
+const report = ref<ImproveReport | null>(null)
+const checkError = ref('')
+const selection = ref<SelectionInfo | null>(null)
+/** 正文里当前标了多少处 */
+const marked = ref(0)
+
+function clearMarks() {
+  clearAllMarks()
+  marked.value = 0
+}
+/** 会话 id：同一份文档同一 id，供后端做跨轮指代消解（T7） */
+const sessionId = computed(() => (activeDoc.value ? `doc-${activeDoc.value.id ?? activeDoc.value.name}` : ''))
+
+function refreshSelection() {
+  selection.value = currentSelection()
+}
+
+/** 问知识库：把当前文档一起送过去，做「本文 vs 规范」的双源对照（T5） */
+async function askKnowledgeBase() {
+  const question = draft.value.trim() || '本文的写法是否符合规范要求？'
+  if (!activeDoc.value || busy.value || inFlight) return
+  notice.value = ''
+  busy.value = true
+  inFlight = true
+  const turn: Turn = { id: ++seed, question: `知识库：${question}`, status: 'loading', seconds: 0, mode: 'kb' }
+  turns.value = [...turns.value, turn]
+  draft.value = ''
+  scrollToBottom()
+  const local = new AbortController()
+  controller = local
+  ticker = window.setInterval(() => {
+    turn.seconds += 1
+  }, 1000)
+  try {
+    const res = await askKb(question, activeDoc.value.html ?? '')
+    turn.kbAnswer = res.answer
+    turn.citations = res.citations
+    turn.hint = res.mock ? '后端未配置模型，本条由本地规则抽取（不代表模型观点）' : ''
+    turn.status = 'done'
+  } catch (error) {
+    turn.status = 'error'
+    turn.error = { message: (error as Error).message || '知识库请求失败', retryable: true }
+  } finally {
+    inFlight = false
+    stopWaiting()
+    busy.value = false
+    scrollToBottom()
+  }
+}
+
+/** 专业改写：用当前选区 + 前后文（T6） */
+async function rewriteCurrentSelection() {
+  const sel = selection.value ?? currentSelection()
+  if (!activeDoc.value || busy.value || inFlight) return
+  if (!sel || sel.text.length < 10) {
+    notice.value = '请先在正文里选中要改写的段落（至少 10 字）'
+    return
+  }
+  notice.value = ''
+  busy.value = true
+  inFlight = true
+  const turn: Turn = {
+    id: ++seed,
+    question: `改写选区：${sel.text.slice(0, 30)}…`,
+    status: 'loading',
+    seconds: 0,
+    mode: 'rewrite',
+  }
+  turns.value = [...turns.value, turn]
+  scrollToBottom()
+  const local = new AbortController()
+  controller = local
+  ticker = window.setInterval(() => {
+    turn.seconds += 1
+  }, 1000)
+  try {
+    const res = await rewriteSelection(sel.text, { context: sel.context })
+    if (!res.ok) {
+      turn.status = 'error'
+      turn.error = { message: res.reason || '改写被拒绝', retryable: false }
+    } else {
+      turn.candidate = res.candidate ?? ''
+      turn.changes = res.changes ?? []
+      turn.hint = [res.genreLabel ? `文体：${res.genreLabel}` : '', res.mock ? '离线模拟' : ''].filter(Boolean).join(' · ')
+      turn.status = 'done'
+    }
+  } catch (error) {
+    turn.status = 'error'
+    turn.error = { message: (error as Error).message || '改写失败', retryable: true }
+  } finally {
+    inFlight = false
+    stopWaiting()
+    busy.value = false
+    scrollToBottom()
+  }
+}
+
+async function copyCandidate(text: string) {
+  try {
+    await navigator.clipboard.writeText(text)
+    notice.value = '已复制到剪贴板，可手动粘贴替换（助手不会直接改正文）'
+  } catch {
+    notice.value = '复制失败，请手动选择文本复制'
+  }
+}
+
+/** 检查当前文档：不调模型，纯规则分析，秒回 */
+async function checkDoc() {
+  if (!activeDoc.value || checking.value) return
+  checking.value = true
+  checkError.value = ''
+  try {
+    report.value = await checkDocument(activeDoc.value.html ?? '')
+    marked.value = applyIssueMarks(report.value)
+  } catch (e) {
+    checkError.value = (e as Error).message || '检查失败'
+    report.value = null
+  } finally {
+    checking.value = false
+  }
+}
+const offline = ref(typeof navigator !== 'undefined' ? !navigator.onLine : false)
+const listRef = ref<HTMLElement | null>(null)
+
+let seed = 0
+let controller: AbortController | null = null
+let ticker: number | null = null
+
+/**
+ * 模块级在途锁（非响应式）：不依赖渲染时机，双击 / 连点 / 重复挂载 / 组件重建
+ * 都只会跑出一次 POST /v1/agent/run。
+ */
+let inFlight = false
+let lastSentKey = ''
+let lastSentAt = 0
+const DEDUPE_MS = 1500
+
+function requestKey(htmlLength: number, question: string) {
+  return question + '::' + String(htmlLength)
+}
+
+const canSend = computed(() => draft.value.trim().length > 0 && !busy.value)
+
+function scrollToBottom() {
+  void nextTick(() => {
+    const el = listRef.value
+    if (el) el.scrollTop = el.scrollHeight
+  })
+}
+
+function updateOnline() {
+  offline.value = !navigator.onLine
+}
+
+onMounted(() => {
+  window.addEventListener('online', updateOnline)
+  window.addEventListener('offline', updateOnline)
+  document.addEventListener('selectionchange', refreshSelection)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('selectionchange', refreshSelection)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('online', updateOnline)
+  window.removeEventListener('offline', updateOnline)
+  stopWaiting()
+})
+
+function stopWaiting() {
+  if (ticker) {
+    window.clearInterval(ticker)
+    ticker = null
+  }
+  if (controller) {
+    controller.abort()
+    controller = null
+  }
+}
+
+async function send(text: string, options: { retry?: boolean } = {}) {
+  const question = text.trim()
+  if (!question) return
+  // 双保险：模块级锁 + 响应式 busy，任一在途都直接丢弃这次点击
+  if (inFlight || busy.value) return
+  if (!activeDoc.value) {
+    notice.value = '请先打开一份文档'
+    return
+  }
+  const html = activeDoc.value.html ?? ''
+  const key = requestKey(html.length, question)
+  const now = Date.now()
+  // 同文档同问题 1.5 秒内只发一次（双击、Enter+点击、重试抖动都拦在这里）
+  if (!options.retry && key === lastSentKey && now - lastSentAt < DEDUPE_MS) return
+  notice.value = ''
+  inFlight = true
+  lastSentKey = key
+  lastSentAt = now
+
+  const turn: Turn = { id: ++seed, question, status: 'loading', seconds: 0, mode: 'agent' }
+  turns.value = [...turns.value, turn]
+  draft.value = ''
+  busy.value = true
+  scrollToBottom()
+
+  const local = new AbortController()
+  controller = local
+  ticker = window.setInterval(() => {
+    turn.seconds += 1
+  }, 1000)
+
+  try {
+    const sel = currentSelection()
+    selection.value = sel
+    const result = await runAgent(html, question, {
+      signal: local.signal,
+      selection: sel?.text ?? '',
+      selectionAnchor: sel?.block ?? null,
+      sessionId: sessionId.value,
+    })
+    turn.result = result
+    turn.status = 'done'
+    if (result.refs.length) {
+      marked.value = markRefParagraphs(result.refs.map((r) => r.para))
+    }
+  } catch (error) {
+    if ((error as Error)?.name === 'AbortError' && !(error instanceof AgentError)) {
+      turn.status = 'cancelled'
+    } else {
+      const err = error as AgentError
+      turn.status = 'error'
+      turn.error = {
+        message: err?.message || '请求失败',
+        retryable: err?.kind === 'timeout' || err?.kind === 'http5xx' || err?.kind === 'offline',
+      }
+    }
+  } finally {
+    inFlight = false
+    if (ticker) {
+      window.clearInterval(ticker)
+      ticker = null
+    }
+    controller = null
+    busy.value = false
+    scrollToBottom()
+  }
+}
+
+function cancel() {
+  const current = turns.value[turns.value.length - 1]
+  if (!busy.value) return
+  controller?.abort()
+  controller = null
+  if (ticker) {
+    window.clearInterval(ticker)
+    ticker = null
+  }
+  if (current) current.status = 'cancelled'
+  busy.value = false
+}
+
+function retry(turn: Turn) {
+  // 重试是显式意图，允许绕过 1.5 秒去重（但仍在途锁保护下）
+  void send(turn.question, { retry: true })
+}
+
+function onKeydown(event: KeyboardEvent) {
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault()
+    if (canSend.value) void send(draft.value)
+  }
+}
+
+watch(aiPanelOpen, (open) => {
+  if (open) {
+    notice.value = ''
+    scrollToBottom()
+  }
+})
+</script>
+
+<template>
+  <div>
+    <!-- 悬浮入口：与侧栏共用同一个开关 -->
+    <button
+      v-if="!aiPanelOpen"
+      type="button"
+      aria-label="打开 AI 助手"
+      class="lo-press fixed bottom-5 right-5 z-40 flex h-[46px] w-[46px] items-center justify-center rounded-full text-white shadow-[0_10px_28px_-8px_rgba(10,132,255,0.75)]"
+      style="background-image: linear-gradient(135deg, #0a84ff 0%, #5e5ce6 100%)"
+      @click="aiPanelOpen = true"
+    >
+      <AppIcon name="sparkles" class="h-5 w-5" :stroke-width="1.8" />
+    </button>
+
+    <!-- 面板 -->
+    <section
+      v-if="aiPanelOpen"
+      aria-label="AI 助手"
+      class="lo-glass z-30 flex h-full w-[360px] shrink-0 flex-col overflow-hidden border-l border-white/[0.06]"
+    >
+      <header class="flex shrink-0 items-center gap-2 border-b border-white/[0.06] px-4 py-3">
+        <span class="flex h-7 w-7 items-center justify-center rounded-[9px] bg-[#0A84FF]/15">
+          <AppIcon name="sparkles" class="h-4 w-4 text-[#0A84FF]" :stroke-width="1.8" />
+        </span>
+        <div class="min-w-0 flex-1">
+          <p class="truncate text-[13px] font-semibold text-[#F5F5F7]">AI 助手</p>
+          <p class="truncate text-[11px] text-[#636366]">
+            {{ activeDoc ? `当前文档：${activeDoc.name}` : '还没有打开文档' }}
+          </p>
+        </div>
+        <button
+          type="button"
+          class="rounded-full border border-white/[0.08] px-2 py-1 text-[11px] text-[#A1A1A6] transition-colors hover:bg-white/[0.06] hover:text-[#F5F5F7] disabled:opacity-40"
+          :disabled="!activeDoc || checking"
+          @click="checkDoc()"
+        >
+          {{ checking ? '检查中…' : '检查' }}
+        </button>
+        <button
+          v-if="marked > 0"
+          type="button"
+          class="rounded-full border border-white/[0.08] px-2 py-1 text-[11px] text-[#98989D] transition-colors hover:bg-white/[0.06] hover:text-[#F5F5F7]"
+          :title="`正文里已标 ${marked} 处，点击清除`"
+          @click="clearMarks()"
+        >
+          清除标记
+        </button>
+        <button
+          type="button"
+          aria-label="关闭 AI 助手"
+          class="rounded-md p-1 text-[#636366] transition-colors hover:text-[#F5F5F7]"
+          @click="closeAiPanel()"
+        >
+          <AppIcon name="x" class="h-4 w-4" />
+        </button>
+      </header>
+
+      <p
+        v-if="offline"
+        class="shrink-0 border-b border-[#FF9F0A]/20 bg-[#FF9F0A]/[0.08] px-4 py-2 text-[11px] leading-relaxed text-[#FFB340]"
+      >
+        当前离线，AI 需联网；本地功能不受影响
+      </p>
+
+      <div ref="listRef" class="thin-scroll min-h-0 flex-1 overflow-y-auto px-4 py-3">
+        <!-- 检查报告 -->
+        <div v-if="checkError" class="mb-3 rounded-[12px] border border-[#FF453A]/40 bg-[#FF453A]/10 px-3 py-2">
+          <p class="text-[12px] text-[#FF8A84]">{{ checkError }}</p>
+          <button class="mt-1 text-[11.5px] text-[#0A84FF]" type="button" @click="checkDoc()">重试</button>
+        </div>
+        <div v-else-if="report" class="mb-3">
+          <div class="mb-2 flex items-center justify-between">
+            <span class="text-[11px] uppercase tracking-wide text-[#636366]">文档检查</span>
+            <button type="button" class="text-[11px] text-[#0A84FF]" @click="report = null">收起</button>
+          </div>
+          <DocCheckReport :report="report" />
+        </div>
+
+        <!-- 空状态：3 条示例 -->
+        <div v-if="!turns.length && !report" class="flex flex-col gap-2">
+          <p class="text-[12px] leading-relaxed text-[#98989D]">
+            问点什么，AI 会先读当前文档再回答；点「检查」会把问题直接标在正文里。
+          </p>
+          <button
+            v-for="example in EXAMPLES"
+            :key="example"
+            type="button"
+            class="rounded-[12px] bg-[#2C2C2E] px-3 py-2.5 text-left text-[12.5px] text-[#F5F5F7] transition-colors hover:bg-[#3A3A3C] disabled:pointer-events-none disabled:opacity-40"
+            :disabled="busy"
+            @click="send(example)"
+          >
+            {{ example }}
+          </button>
+        </div>
+
+        <!-- 对话 -->
+        <div v-for="turn in turns" :key="turn.id" class="mb-3 last:mb-0">
+          <p class="mb-2 text-right">
+            <span class="inline-block max-w-full rounded-[12px] bg-[#0A84FF]/15 px-3 py-2 text-[12.5px] leading-relaxed text-[#F5F5F7]">
+              {{ turn.question }}
+            </span>
+          </p>
+
+          <!-- 等待态 -->
+          <div
+            v-if="turn.status === 'loading'"
+            class="flex items-center gap-2 rounded-[12px] bg-[#1F1F21] px-3 py-2.5 text-[12px] text-[#98989D]"
+          >
+            <AppIcon name="loader" class="lo-spin h-3.5 w-3.5 text-[#0A84FF]" :stroke-width="2" />
+            <span class="tabular-nums">正在执行… 已等待 {{ turn.seconds }} 秒</span>
+            <button
+              type="button"
+              class="ml-auto rounded-full border border-white/[0.08] px-2 py-0.5 text-[11px] text-[#F5F5F7] hover:bg-white/[0.06]"
+              @click="cancel()"
+            >
+              取消
+            </button>
+          </div>
+
+          <!-- 已取消 -->
+          <p
+            v-else-if="turn.status === 'cancelled'"
+            class="rounded-[12px] bg-[#1F1F21] px-3 py-2 text-[11.5px] text-[#636366]"
+          >
+            已取消，本次没有改动文档
+          </p>
+
+          <!-- 错误 -->
+          <div
+            v-else-if="turn.status === 'error'"
+            class="rounded-[12px] border border-[#FF453A]/40 bg-[#FF453A]/10 px-3 py-2.5"
+          >
+            <p class="text-[12px] leading-relaxed text-[#FF6961]">{{ turn.error?.message }}</p>
+            <div class="mt-1.5 flex items-center gap-2">
+              <button
+                v-if="turn.error?.retryable"
+                type="button"
+                class="rounded-full bg-[#3A3A3C] px-2.5 py-1 text-[11px] text-[#F5F5F7] hover:bg-[#48484A]"
+                @click="retry(turn)"
+              >
+                重试
+              </button>
+              <span class="text-[11px] text-[#636366]">本地文档未受影响</span>
+            </div>
+          </div>
+
+          <!-- 知识库问答结果 -->
+          <div v-else-if="turn.mode === 'kb' && turn.kbAnswer" class="flex flex-col gap-2">
+            <p class="whitespace-pre-wrap text-[13.5px] leading-relaxed text-[#F5F5F7]">{{ turn.kbAnswer }}</p>
+            <div v-if="turn.citations?.length" class="flex flex-col gap-1 rounded-[12px] bg-[#1F1F21] p-2.5">
+              <p class="text-[11px] text-[#636366]">依据（{{ turn.citations.length }} 条）</p>
+              <div v-for="c in turn.citations" :key="c.n" class="flex items-start gap-1.5">
+                <span class="shrink-0 rounded-[6px] px-[5px] py-[1px] text-[10.5px] leading-[1.5]"
+                  :class="c.source === 'doc' ? 'bg-[#30D158]/15 text-[#30D158]' : 'bg-[#0A84FF]/15 text-[#6FB6FF]'">
+                  {{ c.source === 'doc' ? '本文·' + ((c.para ?? 0) + 1) : 'kb·' + c.n }}
+                </span>
+                <span class="min-w-0 break-words text-[11.5px] leading-relaxed text-[#98989D]">
+                  {{ c.source === 'doc' ? '' : '《' + c.doc + '》' }}{{ c.heading || '' }} {{ c.snippet }}
+                </span>
+              </div>
+            </div>
+            <p v-if="turn.hint" class="text-[11px] text-[#FFB340]">{{ turn.hint }}</p>
+          </div>
+
+          <!-- 改写结果 -->
+          <div v-else-if="turn.mode === 'rewrite' && turn.candidate !== undefined" class="flex flex-col gap-2">
+            <p class="whitespace-pre-wrap rounded-[12px] bg-[#1F1F21] p-3 text-[13px] leading-relaxed text-[#F5F5F7]">
+              {{ turn.candidate }}
+            </p>
+            <div v-if="turn.changes?.length" class="flex flex-col gap-1">
+              <p class="text-[11px] text-[#636366]">改动（{{ turn.changes.length }} 处）</p>
+              <p v-for="(c, i) in turn.changes" :key="i" class="text-[11.5px] text-[#98989D]">
+                · {{ c.type }}：{{ c.from }} → {{ c.to }}<span v-if="c.note">（{{ c.note }}）</span>
+              </p>
+            </div>
+            <div class="flex items-center gap-2">
+              <button
+                type="button"
+                class="rounded-full bg-[#3A3A3C] px-2.5 py-1 text-[11px] text-[#F5F5F7] hover:bg-[#48484A]"
+                @click="copyCandidate(turn.candidate ?? '')"
+              >
+                复制改写结果
+              </button>
+              <span class="text-[11px] text-[#636366]">{{ turn.hint }}</span>
+            </div>
+            <p class="text-[11px] text-[#636366]">助手不会改动正文，请确认后手动替换</p>
+          </div>
+
+          <!-- Agent 结果 -->
+          <div v-else-if="turn.result" class="flex flex-col gap-2">
+            <p class="whitespace-pre-wrap text-[13.5px] leading-relaxed text-[#F5F5F7]">{{ turn.result.answer }}</p>
+
+            <div v-if="turn.result.steps.length" class="flex flex-col gap-1 rounded-[12px] bg-[#1F1F21] p-2.5">
+              <p class="mb-0.5 text-[11px] text-[#636366]">执行过程（{{ turn.result.steps.length }} 步）</p>
+              <div v-for="(step, index) in turn.result.steps" :key="index" class="flex items-start gap-1.5">
+                <span
+                  class="mt-[1px] shrink-0 rounded-[6px] bg-[#3A3A3C] px-[5px] py-[1px] text-[10.5px] leading-[1.5] text-[#98989D]"
+                >
+                  {{ PHASE_LABEL[step.phase] ?? step.phase }}
+                </span>
+                <span class="min-w-0 break-words text-[12px] leading-relaxed text-[#98989D]">{{ step.detail }}</span>
+              </div>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-1.5">
+              <span
+                v-for="tool in turn.result.toolsUsed"
+                :key="tool"
+                class="rounded-full bg-[#0A84FF]/15 px-2 py-0.5 text-[11px] text-[#6FB6FF]"
+              >
+                {{ tool }}
+              </span>
+              <span
+                v-if="turn.result.mock"
+                class="rounded-full border border-white/[0.08] px-2 py-0.5 text-[11px] text-[#98989D]"
+                title="后端没有配置模型凭据，本次回答由本地规则生成"
+              >
+                离线模拟
+              </span>
+            </div>
+
+            <!-- 引用定位：点一下跳到正文对应段落 -->
+            <div v-if="turn.result.refs.length" class="flex flex-wrap items-center gap-1.5">
+              <span class="text-[11px] text-[#636366]">引用</span>
+              <button
+                v-for="r in turn.result.refs"
+                :key="r.para"
+                type="button"
+                class="rounded-full bg-[#30D158]/15 px-2 py-0.5 text-[11px] text-[#30D158] hover:bg-[#30D158]/25"
+                :title="r.snippet"
+                @click="markRefs(r.para)"
+              >
+                第 {{ r.para + 1 }} 段
+              </button>
+            </div>
+            <p v-else class="text-[11px] leading-relaxed text-[#FFB340]">
+              这条回答没有引用到具体段落，请核对原文后再采用。
+            </p>
+          </div>
+        </div>
+
+        <p v-if="notice" class="mt-1 rounded-[12px] border border-[#FF9F0A]/20 bg-[#FF9F0A]/[0.08] px-3 py-2 text-[12px] text-[#FFB340]">
+          {{ notice }}
+        </p>
+      </div>
+
+      <footer class="shrink-0 border-t border-white/[0.06] p-3">
+        <div class="flex items-end gap-2">
+          <input
+            v-model="draft"
+            type="text"
+            placeholder="问点关于这份文档的问题…"
+            class="h-9 min-w-0 flex-1 rounded-[10px] border border-white/[0.08] bg-[#1F1F21] px-3 text-[12.5px] text-[#F5F5F7] outline-none placeholder:text-[#636366] focus:border-[#0A84FF]/60"
+            :disabled="busy"
+            @keydown="onKeydown"
+          />
+          <button
+            type="button"
+            class="lo-press flex h-9 shrink-0 items-center gap-1 rounded-full bg-[#0A84FF] px-3 text-[12px] font-medium text-white"
+            :style="{ opacity: canSend ? 1 : 0.4 }"
+            :disabled="!canSend"
+            @click="send(draft)"
+          >
+            发送
+          </button>
+        </div>
+        <p v-if="selection" class="mt-1.5 flex items-center gap-1.5 text-[11px] text-[#30D158]">
+          <span class="truncate">已选中 {{ selection.text.length }} 字：{{ selection.text.slice(0, 20) }}…</span>
+          <button type="button" class="shrink-0 text-[#636366] hover:text-[#F5F5F7]" @click="selection = null">清除</button>
+        </p>
+        <div class="mt-1.5 flex items-center gap-1.5">
+          <button
+            type="button"
+            class="rounded-full border border-white/[0.08] px-2.5 py-1 text-[11px] text-[#A1A1A6] hover:bg-white/[0.06] hover:text-[#F5F5F7] disabled:opacity-40"
+            :disabled="busy || !activeDoc"
+            @click="askKnowledgeBase()"
+          >
+            问知识库
+          </button>
+          <button
+            type="button"
+            class="rounded-full border border-white/[0.08] px-2.5 py-1 text-[11px] text-[#A1A1A6] hover:bg-white/[0.06] hover:text-[#F5F5F7] disabled:opacity-40"
+            :disabled="busy || !selection"
+            @click="rewriteCurrentSelection()"
+          >
+            改写选区
+          </button>
+        </div>
+
+        <p class="mt-1.5 flex items-center gap-1 text-[11px] text-[#636366]">
+          <AppIcon name="lock" class="h-3 w-3 text-[#30D158]" :stroke-width="2" />
+          只读取当前文档做分析，不会修改正文
+        </p>
+      </footer>
+    </section>
+  </div>
+</template>

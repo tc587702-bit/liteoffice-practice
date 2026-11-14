@@ -1,11 +1,27 @@
 <script setup lang="ts">
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useWorkspaceStore } from '../../stores/workspace'
+import { aiPanelOpen } from '../../lib/aiPanelState'
 import AppIcon from '../ui/AppIcon.vue'
 import type { IconName } from '../ui/iconRegistry'
 
 const store = useWorkspaceStore()
 const { toasts } = storeToRefs(store)
+
+/* AI 面板占据右下角（宽 380 + 右边距 20）：面板打开时把 toast 挪到面板左侧，
+   窄屏（< 900px）放不下就挪到顶部，两者都不会覆盖面板的输入区。 */
+const viewportWidth = ref(typeof window !== 'undefined' ? window.innerWidth : 1440)
+const onResize = () => {
+  viewportWidth.value = window.innerWidth
+}
+onMounted(() => window.addEventListener('resize', onResize, { passive: true }))
+onBeforeUnmount(() => window.removeEventListener('resize', onResize))
+
+const placement = computed(() => {
+  if (!aiPanelOpen.value) return 'bottom-6 right-6'
+  return viewportWidth.value >= 900 ? 'bottom-6 right-[420px]' : 'top-3 right-3'
+})
 
 const ICONS: Record<string, IconName> = {
   info: 'info',
@@ -24,7 +40,8 @@ const TONES: Record<string, string> = {
 
 <template>
   <div
-    class="pointer-events-none fixed bottom-6 right-6 z-50 flex w-[min(380px,calc(100vw-48px))] flex-col gap-2"
+    class="pointer-events-none fixed z-50 flex w-[min(380px,calc(100vw-48px))] flex-col gap-2"
+    :class="placement"
   >
     <div
       v-for="toast in toasts"

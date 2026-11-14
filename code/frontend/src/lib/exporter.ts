@@ -122,7 +122,7 @@ export async function exportDocx(doc: DocRecord): Promise<ExportResult> {
 /* ------------------------------------------------------------------ */
 
 export async function exportXlsx(doc: DocRecord): Promise<ExportResult> {
-  if (!doc.sheets || !doc.sheets.length) {
+  if (!doc.sheets?.length) {
     return { ok: false, message: '没有可回写的工作表数据' }
   }
   try {

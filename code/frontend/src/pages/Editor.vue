@@ -10,6 +10,16 @@ import AppButton from '../components/ui/AppButton.vue'
 import AppIcon from '../components/ui/AppIcon.vue'
 import { useFileDrop } from '../components/app/fileDropContext'
 import { outlineFromHtml, useWorkspaceStore } from '../stores/workspace'
+
+/** 富文本编辑区的可访问性属性（contenteditable 只能是 div，用绑定避免静态 role 告警） */
+const editorA11y = { role: 'textbox', 'aria-multiline': 'true' } as const
+
+/** 取节点所在的元素：文本节点向上找 parentElement（抽出来避免嵌套三元） */
+function elementOf(node: Node | null | undefined): HTMLElement | null {
+  if (!node) return null
+  return (node.nodeType === 1 ? node : node.parentElement) as HTMLElement | null
+}
+
 import { formatSize, KIND_EXT } from '../lib/file'
 import { downloadOriginal, exportDocument, exportTextCopy } from '../lib/exporter'
 import { escapeHtml, htmlToPlainText } from '../lib/markdown'
@@ -217,10 +227,7 @@ function refreshMarks() {
       return false
     }
   }
-  const anchorEl =
-    select?.anchorNode && node
-      ? ((select.anchorNode.nodeType === 1 ? select.anchorNode : select.anchorNode.parentElement) as HTMLElement | null)
-      : null
+  const anchorEl = select?.anchorNode && node ? elementOf(select.anchorNode) : null
   const blockName = anchorEl?.closest('h1, h2, p, pre, blockquote, li')?.tagName.toLowerCase() ?? ''
   activeMarks.value = {
     bold: block('bold'),
@@ -625,10 +632,8 @@ const isBinaryText = computed(() => doc.value?.kind === 'pptx' || doc.value?.kin
                     </div>
                     <div
                       ref="editorRef"
-                      role="textbox"
-                      aria-multiline="true"
+                      v-bind="editorA11y"
                       aria-label="文档编辑区"
-                      tabindex="0"
                       :contenteditable="!reading"
                       spellcheck="false"
                       data-placeholder="在这里开始输入内容…"
@@ -669,7 +674,13 @@ const isBinaryText = computed(() => doc.value?.kind === 'pptx' || doc.value?.kin
                   <span class="text-[12px] font-medium text-[#F5F5F7]">文档大纲</span>
                   <span class="text-[11px] tabular-nums text-[#636366]">{{ outline.length }}</span>
                 </div>
-                <input v-model="filter" placeholder="筛选标题" class="lo-input mt-2 h-7 w-full px-2 text-[11.5px]" />
+                <label for="outline-filter" class="sr-only">筛选标题</label>
+                <input
+                  id="outline-filter"
+                  v-model="filter"
+                  placeholder="筛选标题"
+                  class="lo-input mt-2 h-7 w-full px-2 text-[11.5px]"
+                />
               </div>
               <div class="thin-scroll min-h-0 flex-1 overflow-y-auto p-2">
                 <p v-if="outline.length === 0" class="px-2 py-3 text-[12px] leading-relaxed text-[#636366]">

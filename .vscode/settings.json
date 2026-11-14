@@ -1,0 +1,6 @@
+{
+  // Tailwind 的 @tailwind 指令不是标准 at-rule，关掉编辑器的“未知规则”提示
+  "css.lint.unknownAtRules": "ignore",
+  "scss.lint.unknownAtRules": "ignore",
+  "less.lint.unknownAtRules": "ignore"
+}

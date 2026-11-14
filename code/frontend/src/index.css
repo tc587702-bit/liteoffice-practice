@@ -176,7 +176,7 @@ body {
 
   .lo-btn-danger {
     background-color: rgba(255, 69, 58, 0.12);
-    color: #ff6961;
+    color: #ff8a84;
     border: 1px solid rgba(255, 69, 58, 0.3);
   }
   .lo-btn-danger:hover {
@@ -322,7 +322,10 @@ body {
 }
 
 .lo-hover-lift {
-  transition: all 0.2s ease;
+  transition:
+    transform 0.2s ease,
+    border-color 0.2s ease,
+    background-color 0.2s ease;
 }
 .lo-hover-lift:hover {
   transform: translateY(-2px);
@@ -529,7 +532,7 @@ body {
 
 .lo-word-wrap {
   overflow-wrap: anywhere;
-  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 /* 屏幕外的块跳过布局与绘制（浏览器级虚拟化，配合分块渲染把大文档成本压到可视区） */
@@ -553,22 +556,94 @@ body {
     transition-delay: 0ms !important;
     scroll-behavior: auto !important;
   }
-  .lo-rise {
+  /* 四个动画元素统一关掉，避免同一个选择器在文件里出现两次 */
+  .lo-rise,
+  .lo-spotlight,
+  .lo-reel,
+  .lo-reel-col,
+  .lo-reel-track {
+    animation: none;
     opacity: 1;
     transform: none;
+    height: auto;
+    overflow: visible;
   }
   .lo-spotlight {
     display: none;
   }
-  .lo-reel,
-  .lo-reel-col {
-    height: auto;
-    overflow: visible;
-  }
-  .lo-reel-track {
-    transform: none !important;
-  }
   .lo-reel-digit:not(:last-child) {
     display: none;
   }
+}
+/* 仅屏幕阅读器可见（给没有 <label> 的输入框配可访问名称） */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+/* 检查报告里点「定位」时，对应段落闪一下 */
+.lo-locate-flash {
+  animation: lo-locate 1.6s ease-out;
+  border-radius: 6px;
+}
+@keyframes lo-locate {
+  0% { background-color: rgba(10, 132, 255, 0.28); }
+  100% { background-color: transparent; }
+}
+
+/* 点击答案里的「第 N 段」时，对应段落闪一下（与问题标记区分颜色） */
+.lo-ref-flash {
+  animation: lo-ref 1.6s ease-out;
+  border-radius: 6px;
+}
+@keyframes lo-ref {
+  0% { background-color: rgba(48, 209, 88, 0.22); }
+  100% { background-color: transparent; }
+}
+
+/* ---- 文档内问题标记（持久）：左色条 + 淡底 + 右上角编号 ---- */
+.lo-issue-mark {
+  position: relative;
+  border-radius: 4px;
+  padding-left: 6px;
+  border-left: 3px solid transparent;
+}
+.lo-issue-error {
+  border-left-color: #ff453a;
+  background-color: rgba(255, 69, 58, 0.06);
+}
+.lo-issue-warning {
+  border-left-color: #ffb340;
+  background-color: rgba(255, 179, 64, 0.06);
+}
+.lo-issue-info {
+  border-left-color: #8e8e93;
+  background-color: rgba(142, 142, 147, 0.05);
+}
+.lo-issue-mark::after {
+  content: attr(data-issue-badge);
+  position: absolute;
+  right: 4px;
+  top: 2px;
+  font-size: 10px;
+  line-height: 14px;
+  padding: 0 4px;
+  border-radius: 7px;
+  background: rgba(255, 69, 58, 0.9);
+  color: #fff;
+}
+.lo-issue-warning::after { background: rgba(255, 179, 64, 0.95); color: #1c1c1e; }
+.lo-issue-info::after { background: rgba(142, 142, 147, 0.95); }
+
+/* 引用段落：绿色波浪下划线（与问题标记区分） */
+.lo-ref-mark {
+  border-bottom: 2px solid rgba(48, 209, 88, 0.85);
+  background-color: rgba(48, 209, 88, 0.07);
+  border-radius: 3px;
 }

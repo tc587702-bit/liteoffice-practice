@@ -1,5 +1,5 @@
 import { entryBytes, listByPrefix, unzip, type ZipArchive } from './zip'
-import { attr, childElements, descendants, escapeXml, firstChild, firstDescendant, parseXml, parseXmlFromZip } from './xml'
+import { attr, childElements, descendants, escapeXml, firstChild, firstDescendant, parseXmlFromZip } from './xml'
 
 /* ------------------------------------------------------------------ */
 /* 类型                                                                 */
@@ -45,6 +45,8 @@ export interface ParseOptions {
 
 const EMU_PER_PX = 9525
 
+type ImageExt = 'png' | 'jpeg' | 'gif'
+
 const MIME_BY_EXT: Record<string, string> = {
   png: 'image/png',
   jpg: 'image/jpeg',
@@ -77,7 +79,7 @@ function bytesToBase64(bytes: Uint8Array): string {
   let binary = ''
   const chunk = 0x8000
   for (let i = 0; i < bytes.length; i += chunk) {
-    binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunk)))
+    binary += String.fromCodePoint(...Array.from(bytes.subarray(i, i + chunk)))
   }
   return btoa(binary)
 }
@@ -163,12 +165,26 @@ const ROMAN: [number, string][] = [
   [1, 'i'],
 ]
 
+/**
+ * 字母编号：1→a、26→z、27→aa（Word 的行为，不是绕回 a）
+ * base 是 'a' 或 'A' 的码点。
+ */
+function letters(value: number, base: number): string {
+  let n = Math.max(1, Math.floor(value)) - 1
+  let out = ''
+  do {
+    out = String.fromCodePoint(base + (n % 26)) + out
+    n = Math.floor(n / 26) - 1
+  } while (n >= 0)
+  return out
+}
+
 export function formatCounter(value: number, numFmt: string): string {
   switch (numFmt) {
     case 'lowerLetter':
-      return String.fromCharCode(97 + ((value - 1) % 26))
+      return letters(value, 97)
     case 'upperLetter':
-      return String.fromCharCode(65 + ((value - 1) % 26))
+      return letters(value, 65)
     case 'lowerRoman':
     case 'upperRoman': {
       let n = value
@@ -254,6 +270,33 @@ type ImageResolver = (rels: Map<string, string>, embed: string) => { src: string
 /* 段落内容                                                            */
 /* ------------------------------------------------------------------ */
 
+/** 把 w:drawing 转成 <img>（或占位），从 extractRunHtml 里抽出来降复杂度 */
+function drawingToHtml(
+  child: Element,
+  resolveImage: ImageResolver | null,
+  rels: Map<string, string>,
+): string {
+  const blip = firstDescendant(child, 'blip')
+  const embed = attr(blip, 'embed') ?? attr(blip, 'link')
+  const extent = firstDescendant(child, 'extent')
+  const docPr = firstDescendant(child, 'docPr')
+  const alt = attr(docPr, 'descr') ?? attr(docPr, 'name') ?? '内嵌图片'
+  if (!embed || !resolveImage) return imagePlaceholder(alt, '无法读取引用')
+
+  const resolved = resolveImage(rels, embed)
+  if (!resolved.src) return imagePlaceholder(alt, resolved.reason ?? '格式暂不支持预览')
+  const safeSrc = sanitizeUrl(resolved.src)
+  if (!safeSrc) return imagePlaceholder(alt, '图片来源未通过安全校验')
+
+  const cx = toNumber(attr(extent, 'cx'))
+  const cy = toNumber(attr(extent, 'cy'))
+  const width = cx ? Math.round(cx / EMU_PER_PX) : undefined
+  const height = cy ? Math.round(cy / EMU_PER_PX) : undefined
+  const size = width ? ` width="${width}"` : ''
+  const hsize = height ? ` height="${height}"` : ''
+  return `<img src="${safeSrc}" alt="${escapeXml(alt)}"${size}${hsize} loading="lazy" />`
+}
+
 function extractRunHtml(run: Element, resolveImage: ImageResolver | null, rels: Map<string, string>): string {
   let html = ''
   childElements(run).forEach((child) => {
@@ -265,33 +308,7 @@ function extractRunHtml(run: Element, resolveImage: ImageResolver | null, rels: 
     } else if (tag === 'br') {
       html += '<br />'
     } else if (tag === 'drawing') {
-      // 内嵌图片：w:drawing → a:blip@r:embed
-      const blip = firstDescendant(child, 'blip')
-      const embed = attr(blip, 'embed') ?? attr(blip, 'link')
-      const extent = firstDescendant(child, 'extent')
-      const cx = toNumber(attr(extent, 'cx'))
-      const cy = toNumber(attr(extent, 'cy'))
-      const docPr = firstDescendant(child, 'docPr')
-      const alt = attr(docPr, 'descr') ?? attr(docPr, 'name') ?? '内嵌图片'
-      if (!embed || !resolveImage) {
-        html += imagePlaceholder(alt, '无法读取引用')
-        return
-      }
-      const resolved = resolveImage(rels, embed)
-      if (!resolved.src) {
-        html += imagePlaceholder(alt, resolved.reason ?? '格式暂不支持预览')
-        return
-      }
-      const safeSrc = sanitizeUrl(resolved.src)
-      if (!safeSrc) {
-        html += imagePlaceholder(alt, '图片来源未通过安全校验')
-        return
-      }
-      const width = cx ? Math.round(cx / EMU_PER_PX) : undefined
-      const height = cy ? Math.round(cy / EMU_PER_PX) : undefined
-      const size = width ? ` width="${width}"` : ''
-      const hsize = height ? ` height="${height}"` : ''
-      html += `<img src="${safeSrc}" alt="${escapeXml(alt)}"${size}${hsize} loading="lazy" />`
+      html += drawingToHtml(child, resolveImage, rels)
     }
   })
   return html
@@ -387,6 +404,47 @@ function itemToHtml(item: DocxItem): string {
   return item.html ? `<p>${item.html}</p>` : ''
 }
 
+interface ListMarker {
+  listMarker?: string
+  listType: 'ol' | 'ul' | null
+}
+
+/**
+ * 根据 numId / ilvl 算出这一段的列表标记，并把计数器推进一格。
+ * 从 handleParagraph 里抽出来：那段的分支太多，认知复杂度 22。
+ */
+function listMarkerFor(
+  numId: string | null,
+  ilvlRaw: string | null,
+  numbering: NumberingMap,
+  state: ListState,
+): ListMarker {
+  if (!numId || numId === '0') return { listType: null }
+  const abstractId = numbering.numToAbstract.get(numId)
+  if (!abstractId) return { listType: null }
+
+  const ilvl = ilvlRaw ? Number(ilvlRaw) : 0
+  const formats = numbering.levels.get(abstractId) ?? new Map<number, LevelFormat>()
+  const format = formats.get(ilvl)
+
+  if (!state.counters.length) state.counters = [0, 0, 0, 0, 0, 0, 0, 0]
+  state.counters[ilvl] = (state.counters[ilvl] ?? 0) + 1
+  // 回到浅层时清空更深层级，否则 2.1 之后会变成 2.2 而不是 1.1
+  for (let i = ilvl + 1; i < state.counters.length; i++) state.counters[i] = 0
+
+  if (!format || format.lvlText === '') {
+    const fallback = formats.get(0)
+    const marker = fallback
+      ? renderLvlText(fallback.lvlText || '%1.', state.counters, formats)
+      : `${state.counters[ilvl]}.`
+    return { listMarker: marker.trim(), listType: 'ol' }
+  }
+  if (format.numFmt === 'bullet' || format.numFmt === 'none') return { listType: 'ul' }
+
+  const marker = renderLvlText(format.lvlText || `%${ilvl + 1}.`, state.counters, formats)
+  return { listMarker: marker.trim(), listType: 'ol' }
+}
+
 /* ------------------------------------------------------------------ */
 /* 主解析                                                              */
 /* ------------------------------------------------------------------ */
@@ -457,40 +515,14 @@ export async function parseDocx(input: ArrayBuffer, options: ParseOptions = {}):
       if (resolved?.src) images.push({ src: resolved.src, name: resolved.name })
     })
 
-    if (numId && numId !== '0' && numbering.numToAbstract.has(numId)) {
-      const ilvl = ilvlRaw ? Number(ilvlRaw) : 0
-      const abstractId = numbering.numToAbstract.get(numId)!
-      const formats = numbering.levels.get(abstractId) ?? new Map<number, LevelFormat>()
-      const format = formats.get(ilvl)
-      if (!listState.counters.length) listState.counters = [0, 0, 0, 0, 0, 0, 0, 0]
-      // 换编号实例时重置更深层级
-      listState.counters[ilvl] = (listState.counters[ilvl] ?? 0) + 1
-      for (let i = ilvl + 1; i < listState.counters.length; i++) listState.counters[i] = 0
-      if (!format || format.lvlText === '') {
-        // 无格式信息时用显式数字向上查找
-        const fallback = formats.get(0)
-        const marker = fallback ? renderLvlText(fallback.lvlText || '%1.', listState.counters, formats) : `${listState.counters[ilvl]}.`
-        items.push({
-          type: 'paragraph',
-          html: content.html,
-          text: content.text,
-          listMarker: marker.trim(),
-          listType: 'ol',
-        })
-        return
-      }
-      const isBullet = format.numFmt === 'bullet' || format.numFmt === 'none'
-      if (isBullet) {
-        items.push({ type: 'paragraph', html: content.html, text: content.text, listType: 'ul' })
-        return
-      }
-      const marker = renderLvlText(format.lvlText || `%${ilvl + 1}.`, listState.counters, formats)
+    const marker = listMarkerFor(numId, ilvlRaw, numbering, listState)
+    if (marker.listType) {
       items.push({
         type: 'paragraph',
         html: content.html,
         text: content.text,
-        listMarker: marker.trim(),
-        listType: 'ol',
+        listMarker: marker.listMarker,
+        listType: marker.listType,
       })
       return
     }
@@ -554,11 +586,12 @@ export function renderItems(items: DocxItem[]): string {
 
   items.forEach((item) => {
     if (item.type === 'paragraph' && item.listType) {
-      if (!listBuffer || listBuffer.type !== item.listType) {
+      if (listBuffer?.type !== item.listType) {
         flush()
         listBuffer = { type: item.listType, items: [] }
       }
-      const marker = item.listType === 'ol' && item.listMarker ? `<span class="lo-marker">${escapeXml(item.listMarker)}</span> ` : ''
+      const markerText = item.listMarker ? escapeXml(item.listMarker) : ''
+      const marker = item.listType === 'ol' && markerText ? `<span class="lo-marker">${markerText}</span> ` : ''
       listBuffer.items.push(`<li>${marker}${item.html || '&nbsp;'}</li>`)
       return
     }
@@ -596,9 +629,8 @@ function runsFromRunHtml(html: string, ctx?: BuildContext): string {
         const text = child.textContent ?? ''
         if (!text) return
         const props = [style.b ? '<w:b/>' : '', style.i ? '<w:i/>' : '', style.u ? '<w:u w:val="single"/>' : ''].join('')
-        out.push(
-          `<w:r>${props ? `<w:rPr>${props}</w:rPr>` : ''}<w:t xml:space="preserve">${escapeXml(text)}</w:t></w:r>`,
-        )
+        const rPr = props ? `<w:rPr>${props}</w:rPr>` : ''
+        out.push(`<w:r>${rPr}<w:t xml:space="preserve">${escapeXml(text)}</w:t></w:r>`)
         return
       }
       if (child.nodeType !== 1) return
@@ -663,7 +695,7 @@ export interface DocxExportReport {
 interface MediaEntry {
   fileName: string
   bytes: Uint8Array
-  ext: 'png' | 'jpeg' | 'gif'
+  ext: ImageExt
 }
 
 interface BuildContext {
@@ -685,71 +717,88 @@ function emptyReport(): DocxExportReport {
 }
 
 /** data URL → 真实二进制；非 base64 / 非支持的 MIME 返回原因 */
-function decodeDataUrl(src: string): { bytes: Uint8Array; ext: 'png' | 'jpeg' | 'gif' } | { reason: string } {
+type DecodedImage = { bytes: Uint8Array; ext: ImageExt }
+type DecodeFailure = { reason: string }
+
+function pickImageExt(mime: string): ImageExt | '' {
+  if (mime === 'image/png') return 'png'
+  if (mime === 'image/jpeg' || mime === 'image/jpg') return 'jpeg'
+  if (mime === 'image/gif') return 'gif'
+  return ''
+}
+
+function decodeDataUrl(src: string): DecodedImage | DecodeFailure {
   const trimmed = src.trim()
   if (!/^data:/i.test(trimmed)) return { reason: '不是 data URL（外链图片不会写进 docx）' }
   const match = /^data:([^;,]+)(?:;[^,]*)?;base64,([\s\S]+)$/i.exec(trimmed)
   if (!match) return { reason: '不是 base64 编码的 data URL' }
   const mime = match[1].toLowerCase()
-  const ext =
-    mime === 'image/png'
-      ? 'png'
-      : mime === 'image/jpeg' || mime === 'image/jpg'
-        ? 'jpeg'
-        : mime === 'image/gif'
-          ? 'gif'
-          : ''
+  const ext = pickImageExt(mime)
   if (!ext) return { reason: `${mime} 暂不支持写回（仅支持 png / jpeg / gif）` }
   try {
     const binary = atob(match[2].replace(/\s/g, ''))
     const bytes = new Uint8Array(binary.length)
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.codePointAt(i) ?? 0
     if (!bytes.length) return { reason: '图片二进制为空' }
-    return { bytes, ext: ext as 'png' | 'jpeg' | 'gif' }
+    return { bytes, ext: ext as ImageExt }
   } catch {
     return { reason: 'base64 解码失败' }
   }
 }
 
-/** 从文件头读像素尺寸（PNG / GIF / JPEG），读不到返回 null */
-function readImageSize(bytes: Uint8Array, ext: 'png' | 'jpeg' | 'gif'): { width: number; height: number } | null {
+interface ImageSize {
+  width: number
+  height: number
+}
+
+function sizeFromPng(bytes: Uint8Array, view: DataView): ImageSize | null {
+  if (bytes.length < 24) return null
+  const width = view.getUint32(16)
+  const height = view.getUint32(20)
+  return width > 0 && height > 0 ? { width, height } : null
+}
+
+function sizeFromGif(bytes: Uint8Array, view: DataView): ImageSize | null {
+  if (bytes.length < 10) return null
+  const width = view.getUint16(6, true)
+  const height = view.getUint16(8, true)
+  return width > 0 && height > 0 ? { width, height } : null
+}
+
+/** JPEG：扫描 SOFn 段（逐段跳过，遇到 SOF 就取宽高） */
+function sizeFromJpeg(bytes: Uint8Array, view: DataView): ImageSize | null {
+  let offset = 2
+  while (offset + 9 < bytes.length) {
+    if (bytes[offset] !== 0xff) {
+      offset++
+      continue
+    }
+    const marker = bytes[offset + 1]
+    const skip = marker === 0xd8 || marker === 0xd9 || (marker >= 0xd0 && marker <= 0xd7)
+    if (skip) {
+      offset += 2
+      continue
+    }
+    const isSof = marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc
+    if (isSof) {
+      const height = view.getUint16(offset + 5)
+      const width = view.getUint16(offset + 7)
+      return width > 0 && height > 0 ? { width, height } : null
+    }
+    const length = view.getUint16(offset + 2)
+    if (length < 2) return null
+    offset += 2 + length
+  }
+  return null
+}
+
+/** 从文件头读像素尺寸，读不到返回 null */
+function readImageSize(bytes: Uint8Array, ext: ImageExt): ImageSize | null {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
   try {
-    if (ext === 'png') {
-      if (bytes.length < 24) return null
-      const width = view.getUint32(16)
-      const height = view.getUint32(20)
-      return width > 0 && height > 0 ? { width, height } : null
-    }
-    if (ext === 'gif') {
-      if (bytes.length < 10) return null
-      const width = view.getUint16(6, true)
-      const height = view.getUint16(8, true)
-      return width > 0 && height > 0 ? { width, height } : null
-    }
-    // JPEG：扫描 SOFn 段
-    let offset = 2
-    while (offset + 9 < bytes.length) {
-      if (bytes[offset] !== 0xff) {
-        offset++
-        continue
-      }
-      const marker = bytes[offset + 1]
-      if (marker === 0xd8 || marker === 0xd9 || (marker >= 0xd0 && marker <= 0xd7)) {
-        offset += 2
-        continue
-      }
-      const length = view.getUint16(offset + 2)
-      const isSof = marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc
-      if (isSof) {
-        const height = view.getUint16(offset + 5)
-        const width = view.getUint16(offset + 7)
-        return width > 0 && height > 0 ? { width, height } : null
-      }
-      if (length < 2) return null
-      offset += 2 + length
-    }
-    return null
+    if (ext === 'png') return sizeFromPng(bytes, view)
+    if (ext === 'gif') return sizeFromGif(bytes, view)
+    return sizeFromJpeg(bytes, view)
   } catch {
     return null
   }
@@ -761,7 +810,7 @@ function emuFromPx(px: number): number {
 }
 
 /** 计算落盘尺寸：优先 width/height 属性，缺失按 600px 宽等比 */
-function imageDisplaySize(el: HTMLElement, bytes: Uint8Array, ext: 'png' | 'jpeg' | 'gif') {
+function imageDisplaySize(el: HTMLElement, bytes: Uint8Array, ext: ImageExt) {
   const natural = readImageSize(bytes, ext)
   const attrWidth = Number(el.getAttribute('width'))
   const attrHeight = Number(el.getAttribute('height'))
@@ -789,6 +838,7 @@ function imageRunXml(el: HTMLElement, ctx: BuildContext): string {
     return `<w:r><w:t xml:space="preserve">[图片未导出：${escapeXml(decoded.reason)}]</w:t></w:r>`
   }
 
+  const altAttr = alt ? ` descr="${escapeXml(alt)}"` : ''
   const index = ctx.media.length + 1
   const fileName = `image${index}.${decoded.ext}`
   const relId = `rId${ctx.nextRelId++}`
@@ -807,7 +857,7 @@ function imageRunXml(el: HTMLElement, ctx: BuildContext): string {
     '<wp:inline distT="0" distB="0" distL="0" distR="0">',
     `<wp:extent cx="${cx}" cy="${cy}"/>`,
     '<wp:effectExtent l="0" t="0" r="0" b="0"/>',
-    `<wp:docPr id="${drawingId}" name="Picture ${drawingId}"${alt ? ` descr="${escapeXml(alt)}"` : ''}/>`,
+    `<wp:docPr id="${drawingId}" name="Picture ${drawingId}"${altAttr}/>`,
     '<wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr>',
     `<a:graphic><a:graphicData uri="${PIC_NS}">`,
     '<pic:pic>',
@@ -886,8 +936,8 @@ export function buildDocx(html: string, title = '文档', report?: DocxExportRep
             return `<w:tr>${tds}</w:tr>`
           })
           .join('')
-        bodyXml.push(`<w:tbl><w:tblPr><w:tblW w:w="0" w:type="auto"/><w:tblBorders><w:top w:val="single" w:sz="4" w:color="D9D9DE"/><w:left w:val="single" w:sz="4" w:color="D9D9DE"/><w:bottom w:val="single" w:sz="4" w:color="D9D9DE"/><w:right w:val="single" w:sz="4" w:color="D9D9DE"/><w:insideH w:val="single" w:sz="4" w:color="D9D9DE"/><w:insideV w:val="single" w:sz="4" w:color="D9D9DE"/></w:tblBorders></w:tblPr>${cells}</w:tbl>`)
-        bodyXml.push('<w:p/>')
+        const tableXml = (`<w:tbl><w:tblPr><w:tblW w:w="0" w:type="auto"/><w:tblBorders><w:top w:val="single" w:sz="4" w:color="D9D9DE"/><w:left w:val="single" w:sz="4" w:color="D9D9DE"/><w:bottom w:val="single" w:sz="4" w:color="D9D9DE"/><w:right w:val="single" w:sz="4" w:color="D9D9DE"/><w:insideH w:val="single" w:sz="4" w:color="D9D9DE"/><w:insideV w:val="single" w:sz="4" w:color="D9D9DE"/></w:tblBorders></w:tblPr>${cells}</w:tbl>`)
+        bodyXml.push(tableXml, '<w:p/>')
         return
       }
       if (tag === 'pre') {
@@ -982,4 +1032,4 @@ const APP_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 // zip 在文件末尾导入，避免循环引用阅读困难
 import { zip } from './zip'
 
-export { parseXml }
+export { parseXml } from './xml'

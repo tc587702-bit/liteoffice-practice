@@ -7,18 +7,19 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 TAG_RE = re.compile(r"<[^>]+>")
-BLOCK_RE = re.compile(r"<(h[1-6]|p|li|table)\b[^>]*>([\s\S]*?)</\1>", re.I)
-ROW_RE = re.compile(r"<tr\b[^>]*>([\s\S]*?)</tr>", re.I)
-CELL_RE = re.compile(r"<(td|th)\b[^>]*>([\s\S]*?)</\1>", re.I)
+BLOCK_RE = re.compile(r"<(h[1-6]|p|li|table)\b[^>]*>([\s\S]*?)</\1>", re.IGNORECASE)
+ROW_RE = re.compile(r"<tr\b[^>]*>([\s\S]*?)</tr>", re.IGNORECASE)
+CELL_RE = re.compile(r"<(td|th)\b[^>]*>([\s\S]*?)</\1>", re.IGNORECASE)
 
 
 def strip_tags(html: str) -> str:
-    text = re.sub(r"<br\s*/?>", "\n", html, flags=re.I)
-    text = re.sub(r"</(p|div|li|h[1-6]|tr)>", "\n", text, flags=re.I)
+    text = re.sub(r"<br\s*/?>", "\n", html, flags=re.IGNORECASE)
+    text = re.sub(r"</(p|div|li|h[1-6]|tr)>", "\n", text, flags=re.IGNORECASE)
     text = TAG_RE.sub("", text)
     for a, b in (("&nbsp;", " "), ("&amp;", "&"), ("&lt;", "<"), ("&gt;", ">"), ("&quot;", '"')):
         text = text.replace(a, b)
@@ -79,7 +80,7 @@ def get_stats(html: str) -> ToolResult:
         "paragraphs": sum(1 for b in blocks if b.type == "paragraph"),
         "headings": sum(1 for b in blocks if b.type == "heading"),
         "tables": sum(1 for b in blocks if b.type == "table"),
-        "images": len(re.findall(r"<img\b", html, re.I)),
+        "images": len(re.findall(r"<img\b", html, re.IGNORECASE)),
         "readingMinutes": max(1, round(chars / 350)),
     }
     return ToolResult(
@@ -101,28 +102,82 @@ def get_outline(html: str) -> ToolResult:
     return ToolResult(True, "get_outline", f"共 {len(items)} 个标题：" + summary, {"outline": items})
 
 
+STOP_TERMS = {
+    "这段", "文档", "本文", "内容", "主要", "讲了", "什么", "怎么", "如何", "是否",
+    "多少", "哪些", "提到", "里面", "其中", "请问", "帮我", "一下", "看看", "有没",
+}
+
+
+def query_terms(query: str) -> list[str]:
+    """把一句话拆成检索词：中文按 2-gram，英文/数字按整词，去停用词"""
+    q = (query or "").strip().lower()
+    if not q:
+        return []
+    terms: list[str] = re.findall(r"[a-z0-9]{2,}", q)
+    cjk = re.sub(r"[^\u4e00-\u9fa5]", " ", q)
+    for seg in cjk.split():
+        if len(seg) == 1:
+            continue
+        for i in range(len(seg) - 1):
+            gram = seg[i : i + 2]
+            if gram not in STOP_TERMS:
+                terms.append(gram)
+    # 去重保序
+    seen = set()
+    out = []
+    for t in terms:
+        if t not in seen:
+            seen.add(t)
+            out.append(t)
+    return out
+
+
 def search_document(html: str, query: str, limit: int = 10) -> ToolResult:
+    """
+    文档内检索：按"词"匹配而不是整句匹配。
+
+    为什么改：用户问"安置房缺口是多少"时，整句在文档里必然找不到，
+    必须拆成 2-gram 词再打分，才能定位到相关段落。
+    """
     q = (query or "").strip()
     if not q:
         return ToolResult(False, "search_document", "关键词为空", {})
-    hits = []
+
+    terms = query_terms(q)
+    if not terms:
+        return ToolResult(False, "search_document", "没有可用的检索词", {})
+
+    scored: list[tuple[int, int, dict]] = []
     for i, b in enumerate(split_blocks(html)):
-        pos = b.text.lower().find(q.lower())
-        if pos >= 0:
-            start = max(0, pos - 30)
-            hits.append(
+        text = b.text.lower()
+        matched = [t for t in terms if t in text]
+        if not matched:
+            continue
+        first = min(text.find(t) for t in matched)
+        start = max(0, first - 30)
+        snippet = ("…" if start else "") + b.text[start : first + 60] + "…"
+        scored.append(
+            (
+                len(matched),
+                -i,
                 {
                     "blockIndex": i,
-                    "position": pos,
-                    "snippet": ("…" if start else "") + b.text[start : pos + len(q) + 40] + "…",
-                }
+                    "position": first,
+                    "matched": matched[:5],
+                    "snippet": snippet,
+                },
             )
-    hits = hits[:limit]
+        )
+
+    scored.sort(key=lambda x: (-x[0], x[1]))
+    hits = [s[2] for s in scored[:limit]]
+    if not hits:
+        return ToolResult(False, "search_document", f"没有找到「{q}」相关内容", {"hits": [], "terms": terms})
     return ToolResult(
-        bool(hits),
+        True,
         "search_document",
-        f"「{q}」命中 {len(hits)} 处" if hits else f"没有找到「{q}」",
-        {"hits": hits},
+        f"「{q}」命中 {len(hits)} 处（检索词 {len(terms)} 个）",
+        {"hits": hits, "terms": terms},
     )
 
 
@@ -257,6 +312,118 @@ def diagnose_report(html: str) -> ToolResult:
 
 # ---------------- 注册表（对应图上的 Tool Registry） ----------------
 
+# ---------------- 知识库检索（RAG 工具） ----------------
+
+def kb_search(html: str, query: str = "", kbId: str = "lab", top: int = 3, **_: Any) -> ToolResult:
+    """在共享知识库里检索（与 /v1/kb/*/search 同一套逻辑，不重复实现）"""
+    from . import kb as _kb
+
+    q = (query or "").strip()
+    if not q:
+        return ToolResult(False, "kb_search", "缺少检索词", {})
+    try:
+        hits = _kb.search(kbId, q, top_k=int(top))
+    except Exception as exc:  # noqa: BLE001 边界兜底，异常转为可读提示
+        return ToolResult(False, "kb_search", f"知识库不可用：{exc}", {})
+    if not hits:
+        return ToolResult(True, "kb_search", f"知识库（{kbId}）无相关命中", {"hits": [], "query": q})
+    first = hits[0]
+    summary = f"知识库命中 {len(hits)} 块，首条《{first['docName'][:24]}》"
+    return ToolResult(
+        True,
+        "kb_search",
+        summary,
+        {
+            "query": q,
+            "hits": [
+                {
+                    "doc": h["docName"],
+                    "heading": h.get("heading", ""),
+                    "ord": h["ord"],
+                    "score": round(h["score"], 3),
+                    "snippet": re.sub(r"\s+", " ", h["text"])[:120],
+                }
+                for h in hits
+            ],
+        },
+    )
+
+# ---------------- 文档结构工具（依赖 docmap） ----------------
+
+def doc_outline(html: str, **_: Any) -> ToolResult:
+    """列出章节树：编号、标题、字数"""
+    from . import docmap
+
+    items = docmap.outline(html)
+    if not items:
+        return ToolResult(False, "doc_outline", "没有识别到章节（文档可能没有标题样式或编号）", {})
+    summary = "共 " + str(len(items)) + " 个章节：" + "；".join(
+        f"{it['number']}{it['title'][:16]}" for it in items[:6]
+    )
+    return ToolResult(True, "doc_outline", summary, {"sections": items})
+
+
+def doc_section(html: str, key: str = "", **_: Any) -> ToolResult:
+    """读某一节全文：key 可以是序号(2)、编号(一、)、或标题词(安置房)"""
+    from . import docmap
+
+    sec = docmap.find_section(html, key)
+    if not sec:
+        return ToolResult(False, "doc_section", f"找不到章节「{key}」", {})
+    text = sec.text or "（该章节没有正文）"
+    head = f"第 {sec.index} 节 {sec.title}"
+    return ToolResult(
+        True,
+        "doc_section",
+        f"{head}：{text[:60]}…" if len(text) > 60 else f"{head}：{text}",
+        {"title": sec.title, "level": sec.level, "number": sec.number, "text": text[:1500], "chars": len(text)},
+    )
+
+
+def doc_search(html: str, query: str = "", limit: int = 8, **_: Any) -> ToolResult:
+    """文档内 2-gram 检索，返回段落号与上下文"""
+    from . import docmap
+
+    q = (query or "").strip()
+    if not q:
+        return ToolResult(False, "doc_search", "缺少检索词", {})
+    hits = docmap.search(html, q, limit=int(limit))
+    if not hits:
+        return ToolResult(False, "doc_search", f"文档里没有找到「{q}」", {"hits": []})
+    return ToolResult(True, "doc_search", f"「{q}」在文档内命中 {len(hits)} 处", {"hits": hits})
+
+
+def doc_tables(html: str, **_: Any) -> ToolResult:
+    """结构化表格：行列内容"""
+    from . import docmap
+
+    tables = docmap.tables(html)
+    if not tables:
+        return ToolResult(False, "doc_tables", "文档里没有表格", {})
+    first = tables[0]
+    head = " | ".join(first["rows"][0][:5]) if first["rows"] else ""
+    return ToolResult(
+        True,
+        "doc_tables",
+        f"共 {len(tables)} 个表格，第 1 个 {first['columns']} 列，表头：{head}",
+        {"tables": tables[:3]},
+    )
+
+
+def doc_brief(html: str, **_: Any) -> ToolResult:
+    """文档概要：几个部分 + 每部分首句"""
+    from . import docmap
+
+    text = docmap.brief(html)
+    return ToolResult(True, "doc_brief", text.split("\n")[0], {"brief": text})
+def doc_improve(html: str, **_: Any) -> ToolResult:
+    """文档优化建议：分数 + 问题清单（位置/原因/改法）"""
+    from . import improve
+
+    r = improve.analyze(html)
+    issues = r["issues"][:5]
+    detail = "；".join(f"{i['levelLabel']}：{i['problem']}" for i in issues[:3])
+    return ToolResult(True, "doc_improve", f"{r['summary']}｜{detail}", {"report": r})
 TOOLS: dict[str, dict[str, Any]] = {
     "get_stats": {
         "fn": lambda html, **_: get_stats(html),
@@ -307,6 +474,57 @@ TOOLS: dict[str, dict[str, Any]] = {
         "needs_model": False,
         "destructive": False,
     },
+    "doc_outline": {
+        "fn": lambda html, **_: doc_outline(html),
+        "label": "章节大纲",
+        "description": "列出文档的章节结构（识别 一、（一）1. 这类中文编号）",
+        "needs_model": False,
+        "destructive": False,
+    },
+    "doc_section": {
+        "fn": lambda html, key="", **_: doc_section(html, key),
+        "label": "读某一节",
+        "description": "按序号/编号/标题词读取某一节全文",
+        "needs_model": False,
+        "destructive": False,
+    },
+    "doc_search": {
+        "fn": lambda html, query="", **_: doc_search(html, query),
+        "label": "文档内检索",
+        "description": "在文档内按词检索，返回段落号与上下文",
+        "needs_model": False,
+        "destructive": False,
+    },
+    "doc_tables": {
+        "fn": lambda html, **_: doc_tables(html),
+        "label": "表格内容",
+        "description": "读取文档里的表格行列内容",
+        "needs_model": False,
+        "destructive": False,
+    },
+    "doc_brief": {
+        "fn": lambda html, **_: doc_brief(html),
+        "label": "文档概要",
+        "description": "一句话说明文档分几个部分、每部分讲什么",
+        "needs_model": False,
+        "destructive": False,
+    },
+    "doc_improve": {
+        "fn": lambda html, **_: doc_improve(html),
+        "label": "优化建议",
+        "description": "给出文档评分与改进建议（哪里要改、为什么、怎么改）",
+        "needs_model": False,
+        "destructive": False,
+    },
+    "kb_search": {
+        "fn": lambda html, query="", kbId="lab", top=3, **_: kb_search(
+            html, query, kbId=kbId, top=top
+        ),
+        "label": "知识库检索",
+        "description": "在共享知识库中检索规范与范文，返回片段与出处",
+        "needs_model": False,
+        "destructive": False,
+    },
 }
 
 
@@ -330,5 +548,5 @@ def run_tool(name: str, html: str, params: dict[str, Any] | None = None) -> Tool
     fn: Callable[..., ToolResult] = meta["fn"]
     try:
         return fn(html, **(params or {}))
-    except Exception as exc:  # 工具异常不冒泡到接口层
+    except Exception as exc:  # noqa: BLE001 边界兜底，异常转为可读提示
         return ToolResult(False, name, f"工具执行失败：{exc}", {})

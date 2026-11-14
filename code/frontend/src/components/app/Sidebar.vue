@@ -5,6 +5,7 @@ import { useWorkspaceStore } from '../../stores/workspace'
 import { formatSize, KIND_EXT } from '../../lib/file'
 import AppBadge from '../ui/AppBadge.vue'
 import AppIcon from '../ui/AppIcon.vue'
+import { aiPanelOpen, openAiPanel } from '../../lib/aiPanelState'
 
 const props = defineProps<{
   activeId: string | null
@@ -47,12 +48,14 @@ const countLabel = computed(() => String(docs.value.length).padStart(2, '0'))
       </RouterLink>
       <button
         type="button"
-        class="flex items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[14px] text-[#A1A1A6] outline-none transition-colors hover:bg-white/[0.04] focus-visible:ring-2 focus-visible:ring-[#0A84FF]/60"
-        @click="emit('reserved', 'AI 助手')"
+        class="flex items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[14px] outline-none transition-colors hover:bg-white/[0.04] focus-visible:ring-2 focus-visible:ring-[#0A84FF]/60"
+        :class="aiPanelOpen ? 'bg-white/[0.08] font-medium text-[#F5F5F7]' : 'text-[#A1A1A6]'"
+        :aria-expanded="aiPanelOpen ? 'true' : 'false'"
+        @click="openAiPanel()"
       >
-        <AppIcon name="sparkles" class="h-[18px] w-[18px]" :stroke-width="1.6" />
+        <AppIcon name="sparkles" class="h-[18px] w-[18px] text-[#0A84FF]" :stroke-width="1.6" />
         <span class="flex-1">AI 助手</span>
-        <AppBadge variant="reserved">预留</AppBadge>
+        <AppBadge variant="ok">可用</AppBadge>
       </button>
       <button
         type="button"

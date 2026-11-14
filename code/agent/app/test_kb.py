@@ -11,7 +11,7 @@ from pathlib import Path
 
 os.environ["LITEOFFICE_KB_DB"] = str(Path(tempfile.mkdtemp(prefix="lo-kb-")) / "kb.db")
 
-from app import kb  # noqa: E402
+from app import kb
 
 FAILED = 0
 

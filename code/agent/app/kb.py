@@ -12,7 +12,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import math
 import os
 import re
@@ -24,7 +23,9 @@ from pathlib import Path
 DB_PATH = os.getenv("LITEOFFICE_KB_DB", str(Path(__file__).resolve().parents[1] / "data" / "kb.db"))
 
 TAG_RE = re.compile(r"<[^>]+>")
-BLOCK_RE = re.compile(r"<(h[1-6]|p|li|table)\b[^>]*>([\s\S]*?)</\1>", re.I)
+BLOCK_RE = re.compile(r"<(h[1-6]|p|li|table)\b[^>]*>([\s\S]*?)</\1>", re.IGNORECASE)
+ROW_RE = re.compile(r"<tr\b[^>]*>([\s\S]*?)</tr>", re.IGNORECASE)
+CELL_RE = re.compile(r"<(td|th)\b[^>]*>([\s\S]*?)</\1>", re.IGNORECASE)
 
 SCHEMA = """
 PRAGMA journal_mode = WAL;
@@ -101,8 +102,8 @@ class Chunk:
 
 
 def strip_tags(html: str) -> str:
-    text = re.sub(r"<br\s*/?>", "\n", html, flags=re.I)
-    text = re.sub(r"</(p|div|li|h[1-6]|tr)>", "\n", text, flags=re.I)
+    text = re.sub(r"<br\s*/?>", "\n", html, flags=re.IGNORECASE)
+    text = re.sub(r"</(p|div|li|h[1-6]|tr)>", "\n", text, flags=re.IGNORECASE)
     text = TAG_RE.sub("", text)
     for a, b in (("&nbsp;", " "), ("&amp;", "&"), ("&lt;", "<"), ("&gt;", ">"), ("&quot;", '"')):
         text = text.replace(a, b)
@@ -173,6 +174,16 @@ def chunk_html(html: str, target: int = 400) -> list[Chunk]:
         if tag.startswith("h"):
             flush()
             heading = strip_tags(inner)[:60]
+        elif tag == "table":
+            # 表格按行转文本：行内单元格去重（合并单元格会重复返回同一段文字）
+            for row in ROW_RE.finditer(inner):
+                cells: list[str] = []
+                for cell in CELL_RE.finditer(row.group(1)):
+                    text = strip_tags(cell.group(2)).strip()
+                    if text and (not cells or cells[-1] != text):
+                        cells.append(text)
+                if cells:
+                    lines.append(" | ".join(cells))
         else:
             lines.append(strip_tags(inner))
     flush()
@@ -254,7 +265,11 @@ def add_document(kb_id: str, name: str, content: bytes | str) -> dict:
         return {"ok": True, "docId": exists["id"], "chunks": 0, "deduped": True}
 
     doc_id = uid("doc")
-    chunks = chunk_html(raw) if "<" in raw[:200] else chunk_text(raw)
+    # 不能只看有没有 "<"：公文标题里常出现 《…<…>…》 会被误判成 HTML
+    looks_html = re.search(r"<(p|h[1-6]|table|div|ul|ol|br)\b", raw[:800], re.IGNORECASE) is not None
+    chunks = chunk_html(raw) if looks_html else chunk_text(raw)
+    if not chunks:  # 兜底：HTML 里没切出块就按纯文本切
+        chunks = chunk_text(strip_tags(raw))
     with conn:
         conn.execute(
             "INSERT INTO kb_doc (id, kb_id, name, sha256, bytes, chunks, status, added_at) VALUES (?,?,?,?,?,?,'ready',?)",

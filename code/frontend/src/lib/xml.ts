@@ -5,7 +5,7 @@ export type XmlNode = Element
 /** 惰性创建：模块可在无 DOM 环境（Web Worker）里被导入，只有真正解析 XML 时才需要 DOMParser */
 let parser: DOMParser | null = null
 function getParser(): DOMParser {
-  if (!parser) parser = new DOMParser()
+  parser ??= new DOMParser()
   return parser
 }
 
@@ -36,9 +36,7 @@ export function descendants(node: Node | null | undefined, localName: string): E
   if (!node) return []
   const out: Element[] = []
   const walk = (current: Node) => {
-    const children = current.childNodes
-    for (let i = 0; i < children.length; i++) {
-      const child = children[i]
+    for (const child of current.childNodes) {
       if (child.nodeType !== 1) continue
       const el = child as Element
       if (el.localName === localName) out.push(el)
@@ -53,9 +51,7 @@ export function descendants(node: Node | null | undefined, localName: string): E
 export function childElements(node: Node | null | undefined, localName?: string): Element[] {
   if (!node) return []
   const out: Element[] = []
-  const children = node.childNodes
-  for (let i = 0; i < children.length; i++) {
-    const child = children[i]
+  for (const child of node.childNodes) {
     if (child.nodeType !== 1) continue
     const el = child as Element
     if (!localName || el.localName === localName) out.push(el)
@@ -84,8 +80,7 @@ export function attr(el: Element | null | undefined, name: string): string | nul
   if (!el) return null
   const direct = el.getAttribute(name)
   if (direct !== null) return direct
-  for (let i = 0; i < el.attributes.length; i++) {
-    const a = el.attributes[i]
+  for (const a of Array.from(el.attributes)) {
     if (a.localName === name || a.name.endsWith(':' + name)) return a.value
   }
   return null
