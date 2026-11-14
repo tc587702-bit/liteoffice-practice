@@ -402,6 +402,22 @@ body {
   transition-delay: 120ms;
 }
 
+/* ---------- Markdown 源码编辑（等宽、跟随纸面色调） ---------- */
+.lo-md-source {
+  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+  font-size: 13px;
+  line-height: 1.8;
+  tab-size: 2;
+  color: var(--lo-paper-ink);
+  caret-color: var(--lo-paper-ink);
+  white-space: pre;
+  overflow-x: auto;
+}
+.lo-md-source::placeholder {
+  color: #98989d;
+  opacity: 0.7;
+}
+
 /* ---------- 文档纸面（编辑区内容保持纸白，属于文档内容而非应用外壳） ---------- */
 .lo-editor {
   outline: none;

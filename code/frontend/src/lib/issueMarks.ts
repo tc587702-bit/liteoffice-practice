@@ -2,9 +2,23 @@
 
 import type { ImproveReport, ImproveIssue } from './improveClient'
 import { focusBlock } from './editorEdit'
+import { requestPreviewView } from './editorViewMode'
 
 const MARK_CLASS = 'lo-issue-mark'
 const BADGE_ATTR = 'data-issue-badge'
+
+/** 源码模式下没有 `.lo-editor`：请编辑器切回预览后重试一次，避免标注静默失效 */
+let previewRetryPending = false
+function retryInPreview(rerun: () => void): boolean {
+  if (previewRetryPending) return false
+  if (!requestPreviewView()) return false
+  previewRetryPending = true
+  requestAnimationFrame(() => {
+    previewRetryPending = false
+    rerun()
+  })
+  return true
+}
 
 /** 正文归一化：去空白，便于按 anchor 前缀匹配 */
 function norm(text: string): string {
@@ -32,7 +46,10 @@ export function clearIssueMarks(): void {
 export function markIssues(report: ImproveReport): number {
   clearIssueMarks()
   const blocks = editorBlocks()
-  if (!blocks.length) return 0
+  if (!blocks.length) {
+    retryInPreview(() => markIssues(report))
+    return 0
+  }
 
   const textOf = blocks.map((el) => norm(el.textContent ?? ''))
   let marked = 0
@@ -59,6 +76,10 @@ export function markIssues(report: ImproveReport): number {
 /** 引用定位高亮（与问题标区分颜色） */
 export function markRefs(para: number): boolean {
   if (!Number.isInteger(para) || para < 0) return false
+  if (!document.querySelector('.lo-editor')) {
+    retryInPreview(() => markRefs(para))
+    return false
+  }
   const ok = focusBlock(para) // 点引用 = 光标跳到那一段
   if (!ok) return false
   const blocks = editorBlocks()
@@ -122,6 +143,10 @@ export function markRefParagraphs(paras: number[]): number {
   clearRefs()
   lastRefParas = paras.filter((x) => Number.isInteger(x) && x >= 0)
   const blocks = editorBlocks()
+  if (!blocks.length) {
+    retryInPreview(() => markRefParagraphs(paras))
+    return 0
+  }
   let n = 0
   for (const para of lastRefParas) {
     const el = blocks[para]

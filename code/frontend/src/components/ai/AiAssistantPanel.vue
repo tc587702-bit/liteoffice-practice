@@ -18,6 +18,7 @@ import {
 import { askKb, rewriteSelection, type KbCitation } from '../../lib/kbClient'
 import { diffChars, summarizeDiff, type DiffSegment } from '../../lib/diff'
 import { captureRange, rangeAlive, replaceRange, replaceSelection, restoreRange } from '../../lib/editorEdit'
+import { mdSourceActive } from '../../lib/editorViewMode'
 
 /**
  * AI 助手浮层（懒加载 chunk）。
@@ -502,6 +503,9 @@ watch(aiPanelOpen, (open) => {
 
         <!-- ===== 改写档 ===== -->
         <div v-else-if="tab === 'rewrite'" class="flex flex-col gap-3">
+          <p v-if="mdSourceActive" class="rounded-[12px] border border-[#FF9F0A]/30 bg-[#FF9F0A]/[0.06] px-3 py-2 text-[12px] leading-relaxed text-[#FFB340]">
+            当前是 Markdown 源码模式。源码里没有可划选的正文，切到「预览」后即可选区改写。
+          </p>
           <div v-if="selection" class="rounded-[12px] border border-[#30D158]/30 bg-[#30D158]/[0.06] p-3">
             <p class="mb-1 text-[11px] text-[#30D158]">选中的正文（{{ selection.text.length }} 字）</p>
             <p class="max-h-24 overflow-y-auto text-[12px] leading-relaxed text-[#D9D9DE]">{{ selection.text }}</p>
@@ -523,7 +527,7 @@ watch(aiPanelOpen, (open) => {
           <button
             type="button"
             class="lo-press rounded-full bg-[#0A84FF] px-3 py-1.5 text-[12px] font-medium text-white disabled:opacity-40"
-            :disabled="!selection || busy"
+            :disabled="!selection || busy || mdSourceActive"
             @click="rewriteCurrentSelection()"
           >
             {{ busy ? '生成中…' : '按规范改写这段' }}

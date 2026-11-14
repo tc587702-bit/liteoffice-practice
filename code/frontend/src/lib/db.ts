@@ -18,6 +18,8 @@ export interface DocRecord {
   /** 原始文本（md / pdf / pptx 文本） */
   text?: string
   markdown?: string
+  /** md 解析初稿的源码，供「重置编辑」还原（html 的 originalHtml 对应它） */
+  originalMarkdown?: string
   warnings: string[]
   encoding?: string
   paragraphCount?: number

@@ -39,7 +39,9 @@ function countBlocks(items: { html: string }[]) {
 /* ------------------------------------------------------------------ */
 
 export function exportMarkdown(doc: DocRecord): ExportResult {
-  const markdown = htmlToMarkdown(doc.html)
+  // md 优先导出源码：HTML→Markdown 会丢链接 URL、代码块语言和嵌套列表
+  const source = doc.kind === 'md' && doc.markdown?.trim() ? doc.markdown : htmlToMarkdown(doc.html)
+  const markdown = source.trim() ? source : ''
   if (!markdown.trim()) {
     return { ok: false, message: '编辑区为空，没有可导出的内容' }
   }
