@@ -1,0 +1,48 @@
+# LiteOffice 项目规则（Cline）
+
+## 修 SonarQube 问题
+
+- 本机是 **SonarQube for IDE 单机模式**，只分析已打开 / 已保存的文件；
+  诊断来自 VS Code Problems 面板，由用户用 `@problems` 提供。不要假设你能看到未打开文件的告警。
+- 一次只处理**一个目录或一批明确点名的文件**，不要顺手重排、重命名无关代码。
+- 优先级：Bug / Vulnerability > Code Smell。以下规则默认跳过，或放到最后：
+  `S3776`（认知复杂度）、`S107`（参数过多）、`S1192`（重复字面量）、`S1128`（未使用 import，交给 tsc）。
+- **禁止**为了让告警消失而：
+  - 加 `// NOSONAR`（确认为误报时必须说明规则号与理由）
+  - 用 `any` / `unknown` / `@ts-ignore` 掩盖类型问题
+  - 写空 `catch` 吞异常
+  - 删改测试或绕过自检来迎合规则
+  - 为了「看起来更整洁」做大范围重构
+- 改动必须保持现有行为与对外接口。方案不唯一时，先说明取舍，等确认再动手。
+
+## 错误处理与日志（本项目强制）
+
+- 前端：用 `src/lib/logger.ts` 的 `createLogger(scope)`；禁止 `console.log` 打业务日志。
+- 后端：用 `server/logger.mjs`；Agent：用 `app/logging_conf.py`。
+- 禁止空 catch：降级也要留 `debug` / `warn` 日志，并按 `code` 分类（见 `docs/software/observability.md`）。
+- 对外文案与内部细节分离：`AppError.code` + 用户可读 message，堆栈只进日志。
+- 日志字段不要放 token、文档正文、完整请求体。
+
+## 改完必须自检
+
+| 范围 | 命令 |
+|---|---|
+| 前端 | `cd code/frontend && npm run typecheck`；改 UI / lib 时再加 `npm run build` |
+| 后端 | `cd code/backend && node server/test-db-seq.mjs`；改动 HTTP / WS 时再跑 `npm run smoke`（需先 `npm start`） |
+| Agent | `cd code/agent && python -m app.test_kb`；至少 `python -m py_compile app/*.py` |
+
+全部执行通过再结束任务，并贴出输出摘要。失败就如实说明，不要谎报通过。
+
+## 代码风格
+
+- 注释写「为什么」，不写「是什么」；保持仓库既有中文注释风格。
+- 不引入新依赖，除非用户明确要求。
+- 不改 `docs/software/prototype/`（设计基准，只能向它对齐）。
+- 提交信息格式：`type(scope): 描述`，例如 `fix(frontend): 消除 S2259 空指针告警`。
+
+## 汇报格式
+
+1. 改了哪些文件、分别对应哪条规则
+2. 每条改动一句话理由
+3. 自检命令与结果
+4. 剩余未处理项及原因（哪些是故意不修的）

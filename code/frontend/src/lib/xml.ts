@@ -1,4 +1,7 @@
 import { entryText, type ZipArchive } from './zip'
+import { createLogger } from './logger'
+
+const log = createLogger('xml')
 
 export type XmlNode = Element
 
@@ -16,6 +19,7 @@ export function parseXml(text: string, mime: DOMParserSupportedType = 'applicati
     if (doc.getElementsByTagName('parsererror').length > 0) return null
     return doc
   } catch {
+    log.warn('XML 解析失败，返回 null')
     return null
   }
 }
@@ -27,6 +31,7 @@ export function parseXmlFromZip(archive: ZipArchive | null, path: string): Docum
     if (!text) return null
     return parseXml(text)
   } catch {
+    log.warn('从压缩包读取 XML 失败', { path })
     return null
   }
 }

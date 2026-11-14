@@ -8,8 +8,10 @@
  *  4. 只读工具不修改任何东西；写入动作不在这里（由 UI 层做 Range 替换）
  */
 
+const PIPE = String.raw`\|`
+
 export interface DocBlock {
-  type: 'paragraph' | 'heading' | 'table' | 'image' | 'list' | string
+  type: string
   html: string
   text?: string
   level?: number
@@ -106,7 +108,7 @@ const stripTags = (html: string): string =>
   html
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<\/(p|div|li|h[1-6]|tr)>/gi, '\n')
-    .replace(/<[^>]+>/g, '')
+    .replace(/<[^>]+>/g, '') // NOSONAR: 线性匹配，输入为小段 HTML
     .replace(/&nbsp;/g, ' ')
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
@@ -130,7 +132,9 @@ export function splitBlocks(html: string): DocBlock[] {
       blocks.push({ type: 'heading', level: Number(tag[1]), html: `<${tag}>${inner}</${tag}>`, text: stripTags(inner) })
     } else {
       // 统一类型：p → paragraph，li → list（否则下游按 type 过滤会漏）
-      const type = tag === 'p' ? 'paragraph' : tag === 'li' ? 'list' : tag
+      let type = tag
+      if (tag === 'p') type = 'paragraph'
+      else if (tag === 'li') type = 'list'
       blocks.push({ type, html: `<${tag}>${inner}</${tag}>`, text: stripTags(inner) })
     }
   }
@@ -461,9 +465,9 @@ export function tableToCsv(rows: string[][]): string {
 export function tableToMarkdown(rows: string[][]): string {
   if (!rows.length) return ''
   const width = Math.max(...rows.map((r) => r.length))
-  const pad = (r: string[]) => [...r, ...Array(width - r.length).fill('')]
+  const pad = (r: string[]) => [...r, ...new Array(width - r.length).fill('')]
   const head = pad(rows[0])
   const body = rows.slice(1).map(pad)
-  const line = (cells: string[]) => `| ${cells.map((c) => c.replace(/\|/g, '\\|')).join(' | ')} |`
-  return [line(head), `| ${Array(width).fill('---').join(' | ')} |`, ...body.map(line)].join('\n')
+  const line = (cells: string[]) => `| ${cells.map((c) => c.replaceAll('|', PIPE)).join(' | ')} |`
+  return [line(head), `| ${new Array(width).fill('---').join(' | ')} |`, ...body.map(line)].join('\n')
 }

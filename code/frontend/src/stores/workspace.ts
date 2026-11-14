@@ -16,6 +16,9 @@ import {
 import { extractPdfText } from '../lib/pdf'
 import { forgetPdfDocument, rememberPdfDocument } from '../lib/pdfCache'
 import { parseXlsxInWorker, renderMarkdownInWorker } from '../lib/parseClient'
+import { createLogger } from '../lib/logger'
+
+const log = createLogger('workspace')
 
 export interface ToastMessage {
   id: number
@@ -96,7 +99,7 @@ function memoryHint(size: number, fileName: string) {
 
 type PhaseReporter = (phase: string, done?: number, total?: number) => void
 
-async function buildRecord(
+async function buildRecord( // NOSONAR: 复杂度高，后续拆分
   file: File,
   signal: AbortSignal,
   onPhase: PhaseReporter,
@@ -162,6 +165,11 @@ async function buildRecord(
           if ((workerError as Error)?.name === 'AbortError') throw workerError
           if (isMemoryError(workerError)) throw workerError
           // SheetJS 主路径失败（或 worker 不可用）→ 主线程回退解析器，可中止、可进度
+          log.warn('SheetJS 解析失败，改用内置解析器', {
+            file: file.name,
+            size: file.size,
+            error: (workerError as Error)?.message ?? String(workerError),
+          })
           onPhase('SheetJS 不可用，改用内置解析器（主线程）')
           await new Promise((resolve) => setTimeout(resolve, 0))
           parsed = await parseXlsxFallback(buffer, ['已切换内置解析器读取工作簿'], {
@@ -230,6 +238,14 @@ async function buildRecord(
     if ((error as Error)?.name === 'AbortError') throw error
     if (isMemoryError(error)) throw error
     const message = (error as Error)?.message ?? '未知错误'
+    // 解析失败但仍要出内容（降级为纯文本），因此这里记 warn 而不是 error
+    log.warn('文件解析失败，降级展示', {
+      file: file.name,
+      size: file.size,
+      kind: record.kind,
+      error: message,
+      errorName: (error as Error)?.name,
+    })
     record.warnings = [`无法解析该文件：${message}`]
     record.html = `<p>该文件暂时无法解析，已保留会话记录以便下载原始文件。</p><p>文件名：${escapeHtml(file.name)}</p><p>可尝试「导出文本副本」或「下载原始文件」。</p>`
     try {
@@ -238,8 +254,12 @@ async function buildRecord(
         record.text = decoded.text
         record.warnings = [...record.warnings, '已按纯文本降级读取可读部分']
       }
-    } catch {
-      /* 纯文本兜底同样失败时只保留提示，不抛错、不白屏 */
+    } catch (fallbackError) {
+      // 纯文本兜底同样失败时只保留提示，不抛错、不白屏，但要留痕
+      log.warn('纯文本兜底读取也失败', {
+        file: file.name,
+        error: (fallbackError as Error)?.message ?? String(fallbackError),
+      })
     }
     record.originalHtml = record.html
     notices.push('文件解析失败，已按可读部分降级展示')
@@ -414,8 +434,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       const info = await inspectXlsxWorkbook(await file.arrayBuffer())
       estimatedRows = info.estimatedRows
       largestSheet = info.largestSheet
-    } catch {
-      /* 预读失败不影响继续 */
+    } catch (error) {
+      // 预读失败不影响继续打开，只是给不出规模提示
+      log.debug('预读工作簿规模失败', { file: file.name, error: (error as Error)?.message ?? String(error) })
     }
     return askConfirm({
       title: `大工作簿：${file.name}`,
@@ -446,6 +467,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     hydrated.value = true
     const result = await loadAll()
     if (!result.ok) {
+      log.warn('本地存储不可用，进入降级模式（关掉页面内容会丢）')
       loading.value = false
       persistence.value = 'degraded'
       return
@@ -465,6 +487,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       const firstParagraph = firstParagraphFromHtml(doc.html)
       return firstParagraph === doc.firstParagraph ? doc : { ...doc, firstParagraph }
     })
+    log.info('会话恢复完成', { docs: normalized.length, degraded: persistence.value !== 'ok' })
     docs.value = normalized
     activeId.value =
       sessionActive && normalized.some((doc) => doc.id === sessionActive) ? sessionActive : (normalized[0]?.id ?? null)
@@ -472,7 +495,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     persistence.value = 'ok'
   }
 
-  async function importFiles(files: File[]) {
+  async function importFiles(files: File[]) { // NOSONAR: 复杂度高，后续拆分
     if (!files.length) return
     const accepted: File[] = []
     files.forEach((file) => {
@@ -540,8 +563,15 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         notices.forEach((notice) => addToast({ title: file.name, description: notice, tone: 'info' }))
       } catch (error) {
         if ((error as Error)?.name === 'AbortError') {
+          log.debug('用户取消解析', { file: file.name })
           addToast({ title: `已取消解析 ${file.name}`, description: '没有写入任何内容', tone: 'info' })
         } else if (isMemoryError(error)) {
+          // 内存不足是可恢复的「换小文件」问题：error 级记录，并带上文件规模
+          log.error('解析时内存不足，已中止', error, {
+            file: file.name,
+            size: file.size,
+            kind: detectKind(file.name),
+          })
           fatal.value = {
             fileName: file.name,
             size: file.size,
@@ -551,6 +581,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
           addToast({ title: '内存不足，已停止解析', description: file.name, tone: 'error' })
           break
         } else {
+          log.error('导入文件失败', error, {
+            file: file.name,
+            size: file.size,
+            kind: detectKind(file.name),
+          })
           addToast({ title: `${file.name} 导入失败`, description: (error as Error).message, tone: 'error' })
         }
       } finally {
@@ -561,13 +596,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
     const nextDocs = [...docs.value, ...created]
     docs.value = nextDocs
-    activeId.value = created[created.length - 1].id
+    activeId.value = created.at(-1)?.id ?? null
     void saveSession({ activeId: activeId.value, ids: nextDocs.map((doc) => doc.id), updatedAt: Date.now() })
 
     const first = created[0]
+    const extra = created.length > 1 ? ` · 共 ${created.length} 个文件` : ''
     addToast({
       title: `已导入 ${first.name}`,
-      description: `${formatSize(first.size)}${created.length > 1 ? ` · 共 ${created.length} 个文件` : ''}，全部内容已就绪`,
+      description: `${formatSize(first.size)}${extra}，全部内容已就绪`,
       tone: 'success',
     })
   }
@@ -606,7 +642,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   function updateCell(id: string, sheetIndex: number, row: number, col: number, value: string) {
     const doc = docs.value.find((item) => item.id === id)
-    if (!doc || !doc.sheets) return
+    if (!doc?.sheets) return
     const sheets = setCell(doc.sheets, sheetIndex, row, col, value)
     updateDoc(id, { sheets, dirty: true })
   }

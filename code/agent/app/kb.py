@@ -20,6 +20,11 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .errors import ServiceUnavailable
+from .logging_conf import get_logger
+
+log = get_logger("kb")
+
 DB_PATH = os.getenv("LITEOFFICE_KB_DB", str(Path(__file__).resolve().parents[1] / "data" / "kb.db"))
 
 TAG_RE = re.compile(r"<[^>]+>")
@@ -74,11 +79,17 @@ CREATE INDEX IF NOT EXISTS idx_term_kb ON term(kb_id);
 
 
 def connect() -> sqlite3.Connection:
-    Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.executescript(SCHEMA)
-    return conn
+    """建立连接并确保表结构存在；失败时记录日志并抛 ServiceUnavailable。"""
+    try:
+        Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        conn.executescript(SCHEMA)
+        return conn
+    except (sqlite3.Error, OSError) as exc:
+        # 库文件损坏 / 磁盘满 / 权限问题：都归为「服务不可用」，由 API 层转 503
+        log.exception("知识库连接失败", db=DB_PATH, errorType=type(exc).__name__)
+        raise ServiceUnavailable("知识库暂时不可用，请稍后重试", cause=exc) from exc
 
 
 def now() -> int:
@@ -254,7 +265,11 @@ def add_document(kb_id: str, name: str, content: bytes | str) -> dict:
     入库一份文档。返回 {ok, docId, chunks, deduped}
     去重：同一 kb 内 sha256 相同则跳过。
     """
-    ensure_kb(kb_id)
+    try:
+        ensure_kb(kb_id)
+    except Exception as exc:  # noqa: BLE001
+        log.exception("确保知识库存在失败", kbId=kb_id)
+        raise ServiceUnavailable("知识库暂时不可用，请稍后重试", cause=exc) from exc
     raw = content if isinstance(content, str) else content.decode("utf-8", errors="replace")
     digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
@@ -262,6 +277,7 @@ def add_document(kb_id: str, name: str, content: bytes | str) -> dict:
     exists = conn.execute("SELECT id FROM kb_doc WHERE kb_id = ? AND sha256 = ?", (kb_id, digest)).fetchone()
     if exists:
         conn.close()
+        log.debug("文档已存在，跳过入库", kbId=kb_id, docId=exists["id"], name=name)
         return {"ok": True, "docId": exists["id"], "chunks": 0, "deduped": True}
 
     doc_id = uid("doc")
@@ -280,6 +296,7 @@ def add_document(kb_id: str, name: str, content: bytes | str) -> dict:
             [(uid("chk"), doc_id, kb_id, c.ord, c.text, c.heading) for c in chunks],
         )
     conn.close()
+    log.debug("文档入库完成", kbId=kb_id, docId=doc_id, chunks=len(chunks), bytes=len(raw.encode("utf-8")))
     return {"ok": True, "docId": doc_id, "chunks": len(chunks), "deduped": False}
 
 

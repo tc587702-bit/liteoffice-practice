@@ -8,6 +8,9 @@
  * 4. 失败必须分类并给出人话提示；禁止静默返回空字符串。
  */
 import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist'
+import { createLogger } from './logger'
+
+const log = createLogger('pdf')
 
 /**
  * pdf.js 只在真正打开 PDF 时才加载（动态 import），不进入首屏主包。
@@ -194,6 +197,7 @@ export async function extractPdfText(buffer: ArrayBuffer, options: ExtractOption
   } catch (error) {
     if ((error as Error)?.name === 'AbortError') throw error
     const { code, message } = classifyPdfError(error)
+    log.error('PDF 打开失败', { code, message })
     return fail(code, message)
   }
 
