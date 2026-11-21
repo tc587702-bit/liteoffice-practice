@@ -6,6 +6,8 @@ uvicorn[standard]==0.54.0
 langgraph>=0.2
 langchain-core>=1.0
 langchain-openai>=1.0
+# 向量检索：服务器不需要 torch，用 onnxruntime 跑 bge-small（模型随仓库分发）
+onnxruntime>=1.17
 litellm>=1.50
 
 # 文档解析（tools/ 里的建库与检查脚本用；服务本身不依赖）

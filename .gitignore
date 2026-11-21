@@ -180,3 +180,6 @@ _scratch/
 # 知识库与意图模型：这是"拉下来就能跑"的必要数据（10 MB），其余运行数据仍忽略
 !code/agent/data/kb.db
 !code/agent/data/intent_model.json
+# 向量检索模型（int8，约 23 MB）：服务器不装 torch 时靠它
+!code/agent/data/models/bge-small-zh-v1.5/onnx/
+!code/agent/data/models/bge-small-zh-v1.5/onnx/**
