@@ -8,11 +8,12 @@
  *   emit : input(源码) / save
  * 完整版（行号、折叠、快捷键、滚动同步）可以由他那边覆盖本文件。
  */
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 
 const props = defineProps<{ value: string; docName?: string }>()
 const emit = defineEmits<{ (e: 'input', value: string): void; (e: 'save'): void }>()
 
+const area = ref<HTMLTextAreaElement | null>(null)
 const text = ref(props.value ?? '')
 const dirty = computed(() => text.value !== (props.value ?? ''))
 
@@ -32,7 +33,25 @@ function onInput(e: Event) {
   emit('input', text.value)
 }
 
+/** Tab 缩进两个空格：源码编辑里比切换焦点更符合预期 */
+function insertText(value: string) {
+  const el = area.value
+  if (!el) return
+  const start = el.selectionStart
+  const end = el.selectionEnd
+  text.value = text.value.slice(0, start) + value + text.value.slice(end)
+  emit('input', text.value)
+  void nextTick(() => {
+    el.selectionStart = el.selectionEnd = start + value.length
+  })
+}
+
 function onKeydown(e: KeyboardEvent) {
+  if (e.key === 'Tab' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+    e.preventDefault()
+    insertText('  ')
+    return
+  }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
     e.preventDefault()
     emit('save')
@@ -49,6 +68,7 @@ function onKeydown(e: KeyboardEvent) {
       </span>
     </div>
     <textarea
+      ref="area"
       class="lo-md-source thin-scroll flex-1 resize-none bg-transparent px-4 py-3 font-mono text-[12.5px] leading-[1.75] text-[#F5F5F7] outline-none"
       spellcheck="false"
       :value="text"
