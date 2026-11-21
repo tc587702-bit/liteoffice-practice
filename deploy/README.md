@@ -30,41 +30,39 @@
 
 ---
 
-## 最省事：一条命令
-
-首次部署（自动 build + 上传 + 初始化 + 启动后端）：
+## 最短路径（赶时间看这里）
 
 ```bash
-SERVER=root@你的公网IP bash deploy/release.sh --init
+# 1. 轻量防火墙放行 22、3000
+
+# 2. 本地：先构建前端（生成 dist/）
+cd code/frontend && npm ci && npm run build && cd ../..
+
+# 3. 本地：上传代码（包含 dist 和 Agent 知识库/模型）
+ssh root@IP 'mkdir -p /opt/liteoffice'
+rsync -avz --exclude node_modules --exclude .git --exclude .venv \
+  --exclude '.tmp' \
+  --exclude 'code/backend/data' \
+  --exclude 'code/agent/data/feedback.db' \
+  --exclude '*.db-wal' --exclude '*.db-shm' \
+  --exclude logs --exclude '*.log' \
+  ./ root@IP:/opt/liteoffice/
+
+# 4. 服务器：初始化运行时
+ssh root@IP 'bash /opt/liteoffice/deploy/setup-server.sh'
+
+# 5. 服务器：装依赖 + 启服务
+ssh root@IP 'cd /opt/liteoffice/code/backend && npm ci --omit=dev'
+scp deploy/systemd/*.service root@IP:/etc/systemd/system/
+ssh root@IP 'chown -R liteoffice:liteoffice /opt/liteoffice && \
+  chmod -R a+rX /opt/liteoffice && \
+  systemctl daemon-reload && systemctl enable --now liteoffice-backend'
+
+# 6. 浏览器打开
+# http://IP:3000/
 ```
 
-日常更新：
-
-```bash
-SERVER=root@你的公网IP bash deploy/release.sh
-```
-
-连 Agent 一起装：
-
-```bash
-SERVER=root@你的公网IP bash deploy/release.sh --init --agent
-```
-
-脚本会自动完成：
-
-1. 本地 `npm ci && npm run build`；
-2. rsync 代码、`dist/`、Agent 的 `kb.db` 和 ONNX 模型；
-3. 同步 systemd unit；
-4. `--init` 时执行 `setup-server.sh`（Node/Python/swap/初始知识库）；
-5. 服务器上安装后端依赖并重启；
-6. `--agent` 时安装 Agent 并做健康检查。
-
-> 第一次跑会多次提示输入 root 密码，配 SSH key 可以免输；不配也能用。
-> 前端始终在本地 build，不在 1.6G 小机器上 build。
-
-不想用脚本时，看后面的手动步骤（1–8 节）。
-
----
+后面的章节是每一步的详细说明和排障。
 
 ---
 
@@ -162,14 +160,6 @@ npm ci --omit=dev
 
 如果暂时不演示 AI，可以跳过；跳过时后端仍能正常提供编辑器和分享页，
 只是 `/agent/*` 会返回 502。
-
-也可以让脚本代劳：
-
-```bash
-SERVER=root@你的公网IP bash deploy/release.sh --agent
-```
-
-下面是手动步骤。
 
 ```bash
 ssh root@你的公网IP
@@ -277,21 +267,13 @@ curl -s -X POST http://你的公网IP:3000/api/docs/<id>/share \
 SERVER=root@你的公网IP bash deploy/release.sh
 ```
 
-它会自动：
+它会：
 
 1. 本地 build 前端；
-2. rsync 到服务器（含 `dist/`、Agent 知识库/模型）；
-3. 同步 systemd unit；
-4. 安装后端依赖；
-5. 重启 `liteoffice-backend`；
-6. 如果 Agent 的 venv 存在，顺带重启 `liteoffice-agent`。
-
-首次部署加 `--init`，需要装/更新 Agent 加 `--agent`：
-
-```bash
-SERVER=root@你的公网IP bash deploy/release.sh --init
-SERVER=root@你的公网IP bash deploy/release.sh --agent
-```
+2. rsync 到服务器；
+3. 安装后端依赖；
+4. 重启 `liteoffice-backend`；
+5. 如果 Agent 的 venv 存在，顺带重启 `liteoffice-agent`。
 
 想指定 SSH 端口：
 
