@@ -267,10 +267,32 @@ function onEditorScroll() {
 function syncRenderedPrefix() {
   const node = editorRef.value
   if (!node) return
-  const serialized = Array.from(node.children).map((child) => (child as HTMLElement).outerHTML)
+  const serialized = Array.from(node.children).map((child) =>
+    stripIssueMarks((child as HTMLElement).outerHTML),
+  )
   const end = windowStart.value + serialized.length
   blockSlices = [...blockSlices.slice(0, windowStart.value), ...serialized, ...blockSlices.slice(end)]
   windowEnd.value = end
+}
+
+
+/**
+ * 去掉问题标记留下的 class/属性，只保留文字。
+ *
+ * 标记是"检查结果"的视觉层，不属于文档内容：
+ * 写回 store 或导出时若带上 <span class="lo-issue-mark">，
+ * 导出自检会把它当成异常结构，反复标注也会在 DOM 里越叠越多。
+ */
+function stripIssueMarks(html: string): string {
+  if (!html.includes('lo-issue')) return html
+  let out = html
+  out = out.replace(/<span[^>]*class="[^"]*lo-issue[^"]*"[^>]*>([\s\S]*?)<\/span>/g, '$1')
+  out = out.replace(/\s*data-issue-badge="[^"]*"/g, '')
+  out = out.replace(/class="([^"]*?)\blo-issue-(mark|error|warning|info|block)\b([^"]*?)"/g, (_m, a, _b, c) => {
+    const rest = (a + c).replace(/\s+/g, ' ').trim()
+    return rest ? `class="${rest}"` : ''
+  })
+  return out
 }
 
 function refreshMarks() {

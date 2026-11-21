@@ -574,7 +574,9 @@ def _correct_by_fact(
         f"4. 文体是「{GENRE_LABEL.get(genre, genre)}」，不要写成说明文口吻\n"
         f"\n原句：\n{selection}\n"
     )
-    res = complete([{"role": "user", "content": prompt}], model=model, max_tokens=600)
+    # 推理型模型（deepseek-flash 等）会先输出思考再给正文，
+    # 600 token 经常在思考阶段就被截断 → 正文为空 → 报"模型未返回内容"。
+    res = complete([{"role": "user", "content": prompt}], model=model, max_tokens=2000)
     steps.append({"phase": "correct", "detail": f"按事实改正（{res.model}）"})
     text = (res.text or "").strip().strip('"“”')
 

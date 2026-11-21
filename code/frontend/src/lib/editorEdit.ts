@@ -4,9 +4,13 @@
  * 走原生选区 + input 事件，让 Editor.vue 的 onInput 接管：
  * 这样替换会进撤销栈、会触发保存，跟用户手打完全一样。
  */
-import { requestPreviewView } from './editorViewMode'
+
+// md 源码模式切回预览后重试一次定位，避免连点两次没反应
+let previewRetryPending = false
 
 export interface ReplaceResult {
+  /** 已经有改后内容（同一次修正顺带改掉了） */
+  already?: boolean
   ok: boolean
   message: string
 }
@@ -91,9 +95,6 @@ export function focusBlock(index: number): boolean {
   return true
 }
 
-/** 源码模式切回预览时的重试闸门，防止反复排队 */
-let previewRetryPending = false
-
 /**
  * 保存当前选区（生成改写时调用）。
  *
@@ -173,54 +174,93 @@ export function replaceTextInBlock(
   const block = (Array.from(host.children) as HTMLElement[])[blockIndex]
   if (!block) return { ok: false, message: '目标段落不在可视范围内，先定位一次' }
 
-  const needle = quote.trim()
+  const needle = (quote ?? '').trim()
+  const text = block.textContent ?? ''
+  if (!text) return { ok: false, message: '这一段没有文字' }
   if (!needle) return { ok: false, message: '缺少原文片段' }
 
-  const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT)
-  const nodes: Text[] = []
-  let node = walker.nextNode() as Text | null
-  while (node) {
-    nodes.push(node)
-    node = walker.nextNode() as Text | null
-  }
-
-  // ① 有精确位置：按偏移替换。
-  //    必须走这条 —— 同一段里常有多个「的」「还有」，按第一个匹配改会改错地方：
-  //    该改的没改（问题还在），不该改的被改了（冒出新问题）。
-  const spanMatchesQuote =
+  // ---- ① 确定替换位置：唯一坐标是纯文本下标 ----
+  let at = -1
+  const spanOk =
     !!span &&
     Number.isInteger(span.start) &&
     span.start >= 0 &&
-    span.len > 0 &&
-    span.len === needle.length
+    span.start + needle.length <= text.length &&
+    text.slice(span.start, span.start + needle.length) === needle
 
-  if (span && spanMatchesQuote) {
-    let acc = 0
-    for (const t of nodes) {
-      const text = t.nodeValue ?? ''
-      const from = acc
-      const to = acc + text.length
-      if (from <= span.start && span.start + span.len <= to) {
-        const offset = span.start - from
-        t.nodeValue = text.slice(0, offset) + rewrite + text.slice(offset + span.len)
-        host.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: rewrite }))
-        return { ok: true, message: '已替换，可 Ctrl+Z 撤销' }
+  if (spanOk) {
+    at = span!.start
+  } else {
+    const first = text.indexOf(needle)
+    if (first === -1) {
+      // 原文片段已经不在，但改后的内容已经在段里 —— 说明同一次规则修正
+      // 把相邻问题一起修掉了（例如 的→地 与 脸旁→脸庞 出自同一句）。
+      const rw = (rewrite ?? '').trim()
+      const covered = rw && text.includes(rw.slice(0, Math.min(rw.length, 10)))
+      if (covered) {
+        return { ok: true, already: true, message: '已修正（与相邻问题一并修复）' }
       }
-      acc = to
+      return { ok: false, message: '这一段里找不到原文片段（可能已被改动）' }
     }
+    const second = text.indexOf(needle, first + 1)
+    if (second !== -1) {
+      // 多处出现又拿不到精确位置时宁可不改，也不猜 —— 猜错就是"改出新问题"
+      return { ok: false, message: `原文片段在这一段里出现 ${text.split(needle).length - 1} 次，无法确定改哪一处，请先点「定位」再改` }
+    }
+    at = first
   }
 
-  // ② 没有 span：退回「第一个匹配」（原文片段唯一时才可靠）
-  for (const t of nodes) {
-    const text = t.nodeValue ?? ''
-    const at = text.indexOf(needle)
-    if (at !== -1) {
-      t.nodeValue = text.slice(0, at) + rewrite + text.slice(at + needle.length)
-      host.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: rewrite }))
-      return { ok: true, message: '已替换，可 Ctrl+Z 撤销' }
-    }
+  // ---- ② 落地：整段按纯文本重写 ----
+  const expected = text.slice(0, at) + rewrite + text.slice(at + needle.length)
+  block.textContent = expected
+
+  // ---- ③ 自校验：回读必须与预期一致，否则如实失败 ----
+  const actual = block.textContent ?? ''
+  if (actual !== expected) {
+    block.textContent = text // 回滚，避免留下半成品
+    return { ok: false, message: '写入后校验失败，已回滚（未改动原文）' }
   }
-  return { ok: false, message: '没找到原文片段（可能已被改动）' }
+
+  // ---- ④ 光标放到改后的位置，保持可见 ----
+  try {
+    const target = at + rewrite.length
+    const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT)
+    const nodes: Text[] = []
+    let n = walker.nextNode() as Text | null
+    while (n) {
+      nodes.push(n)
+      n = walker.nextNode() as Text | null
+    }
+    let acc = 0
+    let placed = false
+    for (const t of nodes) {
+      const l = (t.nodeValue ?? '').length
+      if (acc + l >= target) {
+        const range = document.createRange()
+        range.setStart(t, Math.min(l, target - acc))
+        range.collapse(true)
+        const sel = window.getSelection()
+        sel?.removeAllRanges()
+        sel?.addRange(range)
+        placed = true
+        break
+      }
+      acc += l
+    }
+    if (!placed) {
+      const range = document.createRange()
+      range.selectNodeContents(block)
+      range.collapse(false)
+      const sel = window.getSelection()
+      sel?.removeAllRanges()
+      sel?.addRange(range)
+    }
+  } catch {
+    // 光标恢复失败不影响文本已改好
+  }
+
+  host.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: rewrite }))
+  return { ok: true, message: '已替换，可 Ctrl+Z 撤销' }
 }
 
 
@@ -428,3 +468,4 @@ export function flashSpan(blockIndex: number, start: number, len: number): boole
   }, 1700)
   return true
 }
+import { requestPreviewView } from './editorViewMode'

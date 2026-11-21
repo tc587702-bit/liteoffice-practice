@@ -43,8 +43,10 @@ def _issue(
     excerpt: str = "",
     block: int | None = None,
     pos: int | None = None,
+    fix: str | None = None,
+    fix_from: str | None = None,
 ) -> dict[str, Any]:
-    return {
+    out = {
         "level": level,
         "levelLabel": LEVEL_LABEL.get(level, level),
         "where": where,
@@ -55,6 +57,10 @@ def _issue(
         "block": block,
         "pos": pos,
     }
+    if fix and fix_from:
+        out["fix"] = fix
+        out["fixFrom"] = fix_from
+    return out
 
 
 # ---------------------------------------------------------------- ① 词语重复
@@ -398,6 +404,9 @@ def check_punctuation(text: str) -> list[dict[str, Any]]:
                 f"删掉顿号写成「{prev}{conj}{nxt}」，或删掉「{conj}」写成「{prev}、{nxt}」",
                 text[max(0, m.start() - 8): m.end() + 8],
                 pos=at,
+                # 确定性修复：删掉那个顿号（唯一安全解）
+                fix=f"{prev}{conj}{nxt}",
+                fix_from=f"{prev}、{conj}{nxt}",
             )
         )
     return issues
@@ -499,6 +508,25 @@ _DONE = r"(?:全部|全都|都|一点不剩|通通|统统)\s*(?:吃光|吃完|�
 _CONTRA_RE = re.compile(rf"{_NEG}[^。！？；\n]{{0,40}}{_DONE}")
 
 
+def _soften_done(sentence: str) -> str:
+    """
+    把「全部吃光/吃完」改成「勉强吃了几口」，保留前面"不喜欢"的态度。
+
+    为什么用确定性替换而不是让模型改写：
+    这类句子模型每次都换个说法，用户点三次得到三个版本、检查结果还在，
+    体验就是"没什么问题了还反复改"。
+    """
+    for pat, repl in (
+        (r"(全部|全都|都|一点不剩|通通|统统)\s*吃光", "勉强吃了几口"),
+        (r"(全部|全都|都|一点不剩|通通|统统)\s*吃完", "勉强吃了几口"),
+        (r"(全部|全都|都|一点不剩|通通|统统)\s*喝光", "勉强喝了几口"),
+        (r"(全部|全都|都|一点不剩|通通|统统)\s*喝完", "勉强喝了几口"),
+    ):
+        if re.search(pat, sentence):
+            return re.sub(pat, repl, sentence)
+    return sentence
+
+
 def check_contradiction(text: str) -> list[dict[str, Any]]:
     """同句内「否定偏好」与「全部完成」并存 → 逻辑矛盾"""
     issues: list[dict[str, Any]] = []
@@ -507,11 +535,14 @@ def check_contradiction(text: str) -> list[dict[str, Any]]:
             _issue(
                 "warning",
                 f"第 {m.start() + 1}–{m.end()} 字",
-                "前后矛盾：既说不喜欢，又说全部吃完",
+                "前后矛盾：既说不喜欢，又说全部完成",
                 "同一句里先否定偏好、再陈述全部完成，读者无法判断真实态度",
                 "二者择一：删掉否定的部分，或把「全部吃光」改成「勉强吃了几口」",
                 m.group(0)[:80],
                 pos=m.start(),
+                # 确定性修复：把"全部完成"降级为"勉强吃了几口"，保留否定倾向
+                fix=_soften_done(m.group(0)),
+                fix_from=m.group(0)[:80],
             )
         )
     return issues
@@ -531,32 +562,157 @@ _TIME_RE = re.compile(
 )
 
 
+_CN_NUM = {"一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10,
+           "十一": 11, "十二": 12, "半": 0}
+
+_PLAN_RE = re.compile(
+    r"(?:本来|原本|原计划|打算|计划)?\s*(?:要|想)?\s*"
+    r"(上午|下午|中午|傍晚|晚上|早上)?\s*([一二三四五六七八九十\d]{1,3})\s*点\s*(半)?\s*"
+    r"(?:左右)?\s*(?:回家|回去|出发|动身|走)"
+)
+_DELTA_RE = re.compile(r"(提前|推迟|延后|提早)\s*(?:了)?\s*([一二三四五六七八九十两\d]{1,3})\s*(?:个)?\s*(小时|分钟)")
+# 到家时间：先找「到家」，再在附近窗口里取时间点（见 _find_arrival）
+_TIME_ONE_RE = re.compile(
+    r"(上午|下午|中午|傍晚|晚上|早上)?\s*([一二三四五六七八九十\d]{1,3})\s*点\s*(半)?"
+)
+
+
+def _to_int(text: str) -> int | None:
+    text = (text or "").strip()
+    if not text:
+        return None
+    if text.isdigit():
+        return int(text)
+    if text in _CN_NUM:
+        return _CN_NUM[text]
+    # 「十一」「十二」
+    if text.startswith("十") and len(text) == 2 and text[1] in _CN_NUM:
+        return 10 + _CN_NUM[text[1]]
+    return None
+
+
+def _to_24h(period: str | None, hour: int, half: bool) -> int:
+    """返回一天中的第几分钟；下午三点 = 15:00"""
+    if period in ("下午", "傍晚", "晚上") and hour < 12:
+        hour += 12
+    if period == "中午" and hour < 11:
+        hour += 12
+    return hour * 60 + (30 if half else 0)
+
+
+
+
+def _cn_clock(minutes: int) -> str:
+    """把当天分钟数写成中文时刻：14:00 → 「两点」，16:30 → 「四点半」"""
+    minutes %= 24 * 60
+    hour, minute = divmod(minutes, 60)
+    cn = "零一两三四五六七八九十"
+    hour12 = hour % 12 or 12
+    if hour12 <= 10:
+        word = cn[hour12]
+    elif hour12 == 11:
+        word = "十一"
+    else:
+        word = "十二"
+    if minute == 0:
+        return f"{word}点"
+    if minute == 30:
+        return f"{word}点半"
+    return f"{word}点{minute}分"
+
+
+def _find_arrival(text: str, plan_period: str | None = None) -> tuple[bool, int, str]:
+    """
+    找「到家时间」，返回 (是否找到, 当天分钟数)。
+
+    两条关键规则（都是一次次实测踩出来的）：
+      1. 只认离「到家」最近的时间点 —— 否则「三点回家…两点到家」会取到三点
+      2. 时间点没写上午/下午时，沿用最近的时段词，再退回计划时段 ——
+         否则「四点半」会被算成 04:30，跟 14:00 一比就是"差 9 小时"
+    """
+    best: tuple[int, int] | None = None  # (距离, 绝对下标)
+    for anchor in re.finditer(r"到家|回到家里|回到家", text):
+        lo = max(0, anchor.start() - 16)
+        hi = min(len(text), anchor.end() + 16)
+        for tm in _TIME_ONE_RE.finditer(text, lo, hi):
+            # 明显是计划/出发时间的跳过
+            tail = text[tm.end() : tm.end() + 4]
+            if re.match(r"\s*(?:回家|回去|出发|动身)", tail):
+                continue
+            dist = abs(tm.start() - anchor.start())
+            if best is None or dist < best[0]:
+                best = (dist, tm.start(), tm)  # type: ignore[assignment]
+
+    if best is None:
+        return False, 0, ""
+
+    dist, pos, tm = best  # type: ignore[misc]
+    period, hour_text, half = tm.group(1), tm.group(2), tm.group(3)
+    hour = _to_int(hour_text)
+    if hour is None:
+        return False, 0, ""
+
+    if not period:
+        # 同一句里往前找最近的时段词
+        sentence_start = max(text.rfind("。", 0, pos), text.rfind("！", 0, pos), text.rfind("？", 0, pos)) + 1
+        before = text[sentence_start:pos]
+        found = re.findall(r"(上午|下午|中午|傍晚|晚上|早上|夜里)", before)
+        period = found[-1] if found else plan_period
+
+    return True, _to_24h(period, hour, bool(half)), tm.group(0).strip()
+
+
 def check_time_clues(text: str) -> list[dict[str, Any]]:
     """
-    把时间表述全部列出，供人工核对是否自洽。
+    时间线算术检查：只报算得清的矛盾。
 
-    为什么不断言矛盾：算「三点提前一小时应是两点、却说到家四点半」
-    需要理解「回家」与「到家」是不是同一时点，规则判不准。
-    与其误报，不如把线索摆出来让人看 —— 实测样本里这条恰好就是矛盾。
+    「本来打算下午三点回家……提前一个小时……到家刚好四点半」
+      → 计划 15:00 − 1 小时 = 14:00，但文中说 16:30 到家 → 差 2.5 小时，报错。
+    只有时间点、没有先后关系时不下结论（避免"怎么改都还在报"）。
     """
-    hits = [m.group(0) for m in _TIME_RE.finditer(text)]
-    # 裸「一点」绝大多数是"丝毫"义（一点都不喜欢 / 差一点 / 一点点），不是 1 点钟。
-    # 真表时间会带前后缀（一点钟 / 一点半 / 下午一点），所以裸「一点」一律丢弃。
-    # 这是本模块「宁可漏报也不误报」原则的直接应用。
-    hits = [h for h in hits if h.strip() != "一点"]
-    seen: set[str] = set()
-    uniq = [h for h in hits if not (h in seen or seen.add(h))]
-    if len(uniq) < 2:
+    plan = _PLAN_RE.search(text)
+    delta = _DELTA_RE.search(text)
+    if not (plan and delta):
         return []
-    joined = " ／ ".join(uniq[:8])
+
+    plan_hour = _to_int(plan.group(2))
+    delta_n = _to_int(delta.group(2))
+    if plan_hour is None or delta_n is None:
+        return []
+    unit = delta.group(3)
+    delta_min = delta_n * 60 if unit == "小时" else delta_n
+    sign = -1 if delta.group(1) in ("提前", "提早") else 1
+    expect = _to_24h(plan.group(1), plan_hour, bool(plan.group(3))) + sign * delta_min
+
+    whether, actual, arrive_text = _find_arrival(text, plan.group(1))
+    if not whether:
+        return []
+
+    diff = actual - expect
+    if abs(diff) <= 30:  # 半小时以内视为口误范围，不报
+        return []
+
+    fmt = lambda m: f"{m // 60:02d}:{m % 60:02d}"
+    word = "推迟" if diff > 0 else "提前"
+    gap_h, gap_m = abs(diff) // 60, abs(diff) % 60
+    gap_text = f"{gap_h} 小时" + (f" {gap_m} 分" if gap_m else "")
+    # 确定性修复：把到家时间改成推算值（「四点半」→「两点」）
+    fix_text = _cn_clock(expect)
+    fix_from = arrive_text if arrive_text and arrive_text in text else ""
+
     return [
         _issue(
-            "info",
+            "warning",
             "全文",
-            f"出现 {len(uniq)} 处时间表述，请核对是否自洽",
-            "涉及「提前／推迟」与多个时间点时容易算错；本检查只列出线索，不判定对错",
-            f"逐个核对：{joined}",
-            joined,
+            "时间前后矛盾",
+            f"按「{plan.group(0).strip()}」「{delta.group(1)}{delta_n}{unit}」推算，"
+            f"到家应是 {fmt(expect)}，但文中写的是 {fmt(actual)}，差 {gap_text}",
+            f"二选一即可自洽：① 把「{delta.group(1)}{delta_n}{unit}」改成「{word}{gap_text}」；"
+            f"② 或把「{arrive_text or fmt(actual)}」改成「{_cn_clock(expect)}」（{fmt(expect)}）",
+            plan.group(0)[:40],
+            pos=plan.start(),
+            fix=fix_from and fix_text or None,
+            fix_from=fix_from or None,
         )
     ]
 
@@ -699,11 +855,13 @@ def check_facts(
         kind = str(row.get("kind") or "常识错误").strip()
         if kind not in ("常识错误", "前后矛盾", "概念混淆"):
             kind = "常识错误"
+        # kind 与模型给的 problem 常常重复（"前后矛盾：前后矛盾"），去重
+        title = problem if problem.startswith(kind) else f"{kind}：{problem}"
         out.append(
             _issue(
                 "warning",
                 f"第 {pos + 1}–{pos + len(quote)} 字",
-                f"{kind}：{problem}",
+                title,
                 str(row.get("why") or "").strip() or "与常识或上下文不符",
                 str(row.get("how") or "").strip() or "这条涉及事实/概念，需要按事实核对；可用「按事实试改」生成候选",
                 text[max(0, pos - 12): pos + len(quote) + 12],
@@ -724,7 +882,23 @@ def check_facts(
             out[-1]["fixFrom"] = quote
         if len(out) >= _FACT_MAX_ISSUES:
             break
-    return out
+
+    # ---- 过滤"其实没问题"的噪音 ----
+    cleaned: list[dict[str, Any]] = []
+    for it in out:
+        blob = f"{it.get('problem', '')}{it.get('why', '')}"
+        # ① 模型自己都说"不矛盾/并非/不算错"，那就是没问题
+        if re.search(r"不矛盾|不算矛盾|并无矛盾|没有矛盾|并非矛盾|不算错|并非错误", blob):
+            continue
+        # ② 时间矛盾先用规则算术复核：算得清又不差 → 丢掉模型这条
+        if (
+            "时间" in blob
+            and ("矛盾" in blob or "对不上" in blob)
+            and not check_time_clues(text)
+        ):
+            continue
+        cleaned.append(it)
+    return cleaned
 
 
 # ---------------------------------------------------------------- 汇总
@@ -889,18 +1063,42 @@ def _selftest() -> int:
     check("不误报正常句", check_contradiction("我不喜欢吃辣，所以点了清淡的") == [])
     check("不误报跨句", check_contradiction("我不喜欢吃。后来全部吃光了。") == [])
 
-    print("\n=== 6) 时间线索 ===")
+    print("\n=== 6) 时间线（算得清才报）===")
     r7 = check_time_clues("本来打算下午三点回家，提前一个小时就回去了，到家刚好四点半")
-    check("列出多处时间供核对", len(r7) == 1 and "时间表述" in r7[0]["problem"], str(r7[:1]))
-    check("时间点都在提示里", bool(r7) and all(t in r7[0]["how"] for t in ("三点", "四点半")), r7[0]["how"] if r7 else "-")
-    check("识别中文数字「提前一个小时」", bool(r7) and "提前一个小时" in r7[0]["how"], r7[0]["how"] if r7 else "-")
+    check(
+        "报出时间矛盾",
+        len(r7) == 1 and "时间前后矛盾" in r7[0]["problem"],
+        str([i["problem"] for i in r7]),
+    )
+    check(
+        "推算结论正确（应是 14:00，文中 16:30）",
+        bool(r7) and "14:00" in r7[0]["why"] and "16:30" in r7[0]["why"],
+        r7[0]["why"] if r7 else "-",
+    )
+    check(
+        "改法给出两种自洽写法",
+        bool(r7) and "推迟" in r7[0]["how"] and "14:00" in r7[0]["how"],
+        r7[0]["how"] if r7 else "-",
+    )
+    check(
+        "识别中文数字且算对就不报",
+        check_time_clues("本来打算下午三点回家，提前一个小时，两点到家") == [],
+    )
+    check("自洽时间线不报", check_time_clues("我打算晚上八点回家，推迟一个小时，九点到家") == [])
     check("单处时间不提示", check_time_clues("我三点回家") == [])
     check("不误报「差一点摔倒」", check_time_clues("路上很滑，我差一点就摔倒了") == [], str(check_time_clues("路上很滑，我差一点就摔倒了")))
     check("不误报「有一点紧张」", check_time_clues("他有一点紧张，但很快平静下来") == [])
     check("不误报单独的「几点」", check_time_clues("你几点到？我等你") == [])
     check("不误报「一点都不喜欢」", check_time_clues("我一点都不喜欢吃这个菜") == [],
           str([i["how"] for i in check_time_clues("我一点都不喜欢吃这个菜")]))
-    check("仍识别带前后缀的一点钟", bool(check_time_clues("下午一点钟开会，三点散会")))
+    check(
+        "同一天多个时间点但无先后关系，不报",
+        check_time_clues("下午一点钟开会，三点散会") == [],
+    )
+    check(
+        "带时段词也能参与推算",
+        bool(check_time_clues("本来打算下午三点回家，提前两个小时，十一点到家")),
+    )
 
     print("\n=== 7) 事实类：无 Key 如实说明，有 Key 防幻觉 ===")
     from unittest.mock import patch as _patch
@@ -956,7 +1154,7 @@ def _selftest() -> int:
     check("抓到 错字 脸旁", any("脸旁" in p for p in got))
     check("抓到 赘余 路上面", any("路上面" in p for p in got))
     check("抓到 逻辑矛盾", any("前后矛盾" in p for p in got))
-    check("抓到 时间线索", any("时间表述" in p for p in got))
+    check("抓到 时间矛盾", any("时间前后矛盾" in p for p in got))
     check("summary 有条数", "条语病提示" in rep["summary"], rep["summary"])
     check("dims 六个维度齐全", set(rep["dims"]) == set(DIM_LABEL))
     levels = [_ORDER.get(i["level"], 3) for i in rep["issues"]]

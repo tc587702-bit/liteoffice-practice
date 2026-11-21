@@ -162,8 +162,14 @@ def _call_direct(messages: list[dict[str, str]], model: str, max_tokens: int, te
         method="POST",
     )
     last_error = ""
+    budget = max_tokens
     for attempt in range(3):
         try:
+            # 每次重试前按当前预算重建请求体（截断时会翻倍，见下）
+            if budget != max_tokens:
+                body = _json.loads(req.data.decode("utf-8"))
+                body["max_tokens"] = budget
+                req.data = _json.dumps(body).encode("utf-8")
             with urllib.request.urlopen(req, timeout=60) as resp:
                 data = _json.loads(resp.read().decode("utf-8"))
             choice = (data.get("choices") or [{}])[0]
@@ -181,6 +187,12 @@ def _call_direct(messages: list[dict[str, str]], model: str, max_tokens: int, te
                     if candidate:
                         content = candidate
             if not content and choice.get("finish_reason") == "length":
+                # 推理模型的思考吃掉了全部预算：把预算翻倍再试（上限 8000），
+                # 而不是用同一个预算连试三次 —— 那样必然三次都截断。
+                if budget < 8000:
+                    budget = min(8000, budget * 2)
+                    last_error = f"输出被截断，已把 max_tokens 提到 {budget} 重试"
+                    continue
                 raise RuntimeError("模型输出被 max_tokens 截断，且没有可用内容")
             return content
         except urllib.error.HTTPError as exc:

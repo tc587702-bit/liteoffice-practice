@@ -8,7 +8,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { ImproveIssue, ImproveReport } from '../../lib/improveClient'
 import { locateBlock, sendIssueFeedback } from '../../lib/improveClient'
-import { getBlockText, replaceTextInBlock } from '../../lib/editorEdit'
+import { flashSpan, focusSpan, getBlockText, replaceTextInBlock } from '../../lib/editorEdit'
 import { clearAllMarks, clearIssueMarks, markIssues } from '../../lib/issueMarks'
 import { rewriteSelection } from '../../lib/kbClient'
 
@@ -56,25 +56,50 @@ async function dismissIssue(it: ImproveIssue, index: number) {
  */
 function applyFix(it: ImproveIssue) {
   if (!it.fix || it.block === null || it.block === undefined) return
-  // 片段标记会把文本节点切开，先清标记才能按原文精确替换（替换后会重新检查、重新标注）
+
+  // 片段标记会把文本节点切开，先清标记再按纯文本替换。
+  // 替换内部只认纯文本坐标，并在写完后回读校验 —— 失败会如实返回，不再谎报"已修改"。
   clearIssueMarks()
   const res = replaceTextInBlock(it.block, it.fixFrom ?? '', it.fix, it.span)
+  const idx = props.report.issues.indexOf(it)
   if (!res.ok) {
+    setStatus(idx, false, res.message)
     window.dispatchEvent(new CustomEvent('lo:fix-failed', { detail: { message: res.message } }))
     return
   }
-  // 「的→得」这种只改一个字，用户在正文里几乎看不出来 —— 必须让它可见：
-  // ① 卡片上直接写「已改为 …」 ② 正文里闪一下 ③ 滚到那一处
+
+  // 校验：这一段现在确实包含改后的文字，否则视为失败（避免"改过之后还说有问题"）
+  const after = getBlockText(it.block)
+  const needle = (it.fix ?? '').trim()
+  if (needle && !after.includes(needle.slice(0, Math.min(needle.length, 8)))) {
+    setStatus(idx, false, '写入后没能在正文里找到改后的文字，请重试')
+    window.dispatchEvent(new CustomEvent('lo:fix-failed', { detail: { message: '写入校验失败' } }))
+    return
+  }
+
   const before = it.fixFrom ?? ''
   const changedChars = Math.max(1, Math.abs((it.fix ?? '').length - before.length) + 1)
-  const idx = props.report.issues.indexOf(it)
   setStatus(
     idx,
     true,
-    changedChars <= 2 ? '已修改（改动 1–2 个字，请注意正文闪动处）' : '已修改',
+    res.already
+      ? '已修正（与相邻问题一并修复）'
+      : changedChars <= 2
+        ? '已修改（改动 1–2 个字，请注意正文闪动处）'
+        : '已修改',
   )
-  flashBlock(it.block)
+
+  // 顺序很重要：先重画剩余标记（会动 DOM），再放光标；
+  // 反过来的话选区会被重画打断，光标就"时有时无"。
   clearAfterAction(idx)
+
+  const at = getBlockText(it.block).indexOf(needle)
+  if (at >= 0) {
+    focusSpan(it.block, at, needle.length)
+    flashSpan(it.block, at, needle.length)
+  } else {
+    flashBlock(it.block)
+  }
   window.dispatchEvent(new CustomEvent('lo:issue-fixed'))
 }
 
