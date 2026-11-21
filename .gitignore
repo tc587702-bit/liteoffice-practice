@@ -176,3 +176,7 @@ venv/
 # ---- 抓取/临时产物 ----
 .tmp/
 _scratch/
+
+# 知识库与意图模型：这是"拉下来就能跑"的必要数据（10 MB），其余运行数据仍忽略
+!code/agent/data/kb.db
+!code/agent/data/intent_model.json
