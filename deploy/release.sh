@@ -31,7 +31,11 @@ rsync -avz --delete \
   --exclude '.git' \
   --exclude 'node_modules' \
   --exclude '.venv' \
-  --exclude 'data' \
+  --exclude '.tmp' \
+  --exclude 'code/backend/data' \
+  --exclude 'code/agent/data/feedback.db' \
+  --exclude '*.db-wal' \
+  --exclude '*.db-shm' \
   --exclude 'logs' \
   --exclude '*.log' \
   --exclude '.env' \

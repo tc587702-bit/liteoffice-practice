@@ -51,6 +51,15 @@ mkdir -p "${APP_DIR}" "${DATA_DIR}" "${LOG_DIR}" "${ENV_DIR}"
 chown -R "${APP_USER}:${APP_USER}" "${DATA_DIR}" "${LOG_DIR}"
 chmod 750 "${DATA_DIR}" "${LOG_DIR}"
 
+echo "==> 初始化 Agent 知识库"
+if [[ -f "${APP_DIR}/code/agent/data/kb.db" && ! -f "${DATA_DIR}/kb.db" ]]; then
+  install -o "${APP_USER}" -g "${APP_USER}" -m 640 \
+    "${APP_DIR}/code/agent/data/kb.db" "${DATA_DIR}/kb.db"
+  echo "已复制初始知识库到 ${DATA_DIR}/kb.db"
+else
+  echo "跳过（已存在或仓库没有 kb.db）"
+fi
+
 echo "==> 配置 swap（已存在则跳过）"
 if ! swapon --show | grep -q .; then
   fallocate -l 2G /swapfile

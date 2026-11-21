@@ -38,10 +38,14 @@
 # 2. 本地：先构建前端（生成 dist/）
 cd code/frontend && npm ci && npm run build && cd ../..
 
-# 3. 本地：上传代码（包含 dist）
+# 3. 本地：上传代码（包含 dist 和 Agent 知识库/模型）
 ssh root@IP 'mkdir -p /opt/liteoffice'
 rsync -avz --exclude node_modules --exclude .git --exclude .venv \
-  --exclude data --exclude logs --exclude '*.log' \
+  --exclude '.tmp' \
+  --exclude 'code/backend/data' \
+  --exclude 'code/agent/data/feedback.db' \
+  --exclude '*.db-wal' --exclude '*.db-shm' \
+  --exclude logs --exclude '*.log' \
   ./ root@IP:/opt/liteoffice/
 
 # 4. 服务器：初始化运行时
@@ -75,7 +79,11 @@ rsync -avz --delete \
   --exclude '.git' \
   --exclude 'node_modules' \
   --exclude '.venv' \
-  --exclude 'data' \
+  --exclude '.tmp' \
+  --exclude 'code/backend/data' \
+  --exclude 'code/agent/data/feedback.db' \
+  --exclude '*.db-wal' \
+  --exclude '*.db-shm' \
   --exclude 'logs' \
   --exclude '*.log' \
   --exclude '.env' \
@@ -83,6 +91,10 @@ rsync -avz --delete \
   --exclude '.DS_Store' \
   ./ root@你的公网IP:/opt/liteoffice/
 ```
+
+> `code/agent/data/` 里有知识库 `kb.db` 和 ONNX 模型，**要一起上传**。
+> 只排除 `code/backend/data/`（运行时文档库）和 `feedback.db`（运行时反馈），
+> 否则 Agent 会找不到知识库和向量模型。
 
 如果服务器没有 `rsync`：
 
@@ -108,6 +120,7 @@ bash /opt/liteoffice/deploy/setup-server.sh
 - 安装 **Node.js 24**（`node:sqlite` 需要 Node 22.13+）；
 - 创建系统用户 `liteoffice`；
 - 创建 `/var/lib/liteoffice`（SQLite）和 `/var/log/liteoffice`（日志）；
+- 把 `code/agent/data/kb.db` 复制到 `/var/lib/liteoffice/kb.db` 作为初始知识库；
 - 如果服务器没有 swap，创建 2G swap。
 
 ---
@@ -160,6 +173,13 @@ cp /opt/liteoffice/deploy/agent.env.example /etc/liteoffice/agent.env
 chmod 600 /etc/liteoffice/agent.env
 vi /etc/liteoffice/agent.env
 ```
+
+> `requirements.txt` 已经包含 `onnxruntime`，服务器**不需要装 torch**。
+> 不要装 `requirements-local-model.txt`，它会多占约 2.5G 磁盘和 2G 内存。
+>
+> `setup-server.sh` 会把仓库里的 `code/agent/data/kb.db` 复制到
+> `/var/lib/liteoffice/kb.db` 作为初始知识库；ONNX 模型仍从
+> `code/agent/data/models/` 读取。
 
 `agent.env` 里：
 
