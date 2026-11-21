@@ -57,7 +57,7 @@ def _issue(
         "block": block,
         "pos": pos,
     }
-    if fix and fix_from:
+    if fix is not None and fix_from:
         out["fix"] = fix
         out["fixFrom"] = fix_from
     return out
@@ -717,6 +717,143 @@ def check_time_clues(text: str) -> list[dict[str, Any]]:
     ]
 
 
+
+# ---------------------------------------------------------------- ⑧ 乱码
+
+# 白名单：常见英文词、缩写、单位、品牌 —— 这些出现是正常的，不能当乱码
+_GARBLE_WHITELIST = {
+    # 文档里常见的英文词
+    "the", "and", "for", "you", "are", "not", "with", "this", "that", "from", "have", "will",
+    "can", "may", "all", "our", "your", "his", "her", "its", "who", "how", "why", "what",
+    "one", "two", "new", "old", "day", "time", "work", "team", "data", "test", "case", "note",
+    "code", "file", "page", "line", "item", "list", "name", "type", "size", "date", "year",
+    "https", "http", "www", "com", "cn", "org", "net", "html", "php", "json", "pdf", "docx",
+    # 缩写 / 品牌 / 单位
+    "ai", "it", "id", "ip", "ui", "ux", "app", "ppt", "pptx", "word", "excel", "ok", "pc",
+    "cpu", "gpu", "ram", "rom", "usb", "wifi", "api", "url", "css", "js", "ts", "sql",
+    "kb", "mb", "gb", "tb", "km", "kg", "cm", "mm", "ml", "mg", "ms", "hz", "khz", "mhz",
+    "vip", "ceo", "cfo", "hr", "pr", "faq", "gdp", "cpi", "iso", "led", "lcd", "gps", "sms",
+    "wechat", "qq", "bilibili", "github", "google", "microsoft", "apple", "iphone", "ipad",
+    "windows", "linux", "mac", "android", "ios", "office", "wps", "chrome", "edge",
+}
+
+# 已知乱码标记（编码错乱/占位符）
+_GARBLE_MARKERS = (
+    "锟斤拷",
+    "烫烫烫",
+    "屯屯屯",
+    "Ã©",
+    "Â©",
+    "ï¼",
+    "ã€",
+    "å¤",
+    "æˆ",
+    "é—",
+    "çš",
+    "????",
+)
+
+# 字母串：3 个以上连续拉丁字母
+_GARBLE_TOKEN_RE = re.compile(r"[A-Za-z]{3,}")
+
+
+def _is_garble_token(tok: str, left: str, right: str) -> bool:
+    """判断一个字母串是不是乱码（结合上下文：中文包围、无空格分隔等）"""
+    low = tok.lower()
+    if low in _GARBLE_WHITELIST:
+        return False
+    # 全大写缩写（AI/PPT/PDF）通常是正常写法
+    if tok.isupper():
+        return False
+    # 首字母大写可能是人名/品牌（Word/Excel/WeChat）
+    if tok[0].isupper() and low in _GARBLE_WHITELIST:
+        return False
+    # 被中文紧贴（无空格）几乎一定是误输入，如「今天ajiefh去公园」
+    touched_cn = bool(left and "\u4e00" <= left <= "\u9fa5") or bool(right and "\u4e00" <= right <= "\u9fa5")
+    # 键盘乱敲特征：含 3 个以上辅音连排，或长度 ≥4 且不在白名单
+    letters = re.sub(r"[^a-z]", "", low)
+    consonants = re.findall(r"[bcdfghjklmnpqrstvwxz]{3,}", letters)
+    if touched_cn:
+        return True
+    if consonants and len(letters) >= 4:
+        return True
+    return len(letters) >= 5
+
+
+def check_garbled(text: str) -> list[dict[str, Any]]:
+    """
+    乱码检查：无意义字母串（ajiefh）与编码错乱标记（锟斤拷）。
+
+    为什么值得单独一条规则：
+    这类内容既不是错别字也不是语病，前面的检查都不会碰它，
+    但它会一直留在正文里；模型改写也常"看不懂就不动"，于是怎么改都改不掉。
+    这里给确定性修复：直接删掉那一串（含两侧多余空格）。
+    """
+    issues: list[dict[str, Any]] = []
+
+    # ① 编码错乱标记
+    for marker in _GARBLE_MARKERS:
+        for m in re.finditer(re.escape(marker), text):
+            issues.append(
+                _issue(
+                    "warning",
+                    f"第 {m.start() + 1} 字",
+                    f"疑似乱码「{marker}」",
+                    "这是编码错乱留下的字符，正常阅读时会出现方块或无意义符号",
+                    "删掉这一串乱码",
+                    text[max(0, m.start() - 6): m.end() + 6],
+                    pos=m.start(),
+                    fix="",
+                    fix_from=m.group(0),
+                )
+            )
+
+    # ② 无意义字母串
+    # 先屏蔽 URL / 邮箱 / 文件扩展名：里面的 example、com、pdf 都是正常内容
+    masked = text
+    for pat in (
+        r"https?://[^\s，。；、）)]+",
+        r"www\.[^\s，。；、）)]+",
+        r"[\w.+-]+@[\w-]+\.[\w.]+",
+    ):
+        masked = re.sub(pat, lambda m: " " * len(m.group(0)), masked)
+
+    # 整段以英文为主（>35% 是拉丁字母）时不做字母串检查 —— 那是英文正文，不是乱码
+    latin = len(re.findall(r"[A-Za-z]", masked))
+    visible = len(re.sub(r"\s", "", masked)) or 1
+    latin_ratio = latin / visible
+
+    # 只有「整段确实是英文」（字母够多且占比高）才跳过；短句里夹几个字母仍要查
+    english_para = latin >= 30 and latin_ratio > 0.35
+    for m in _GARBLE_TOKEN_RE.finditer(masked) if not english_para else []:
+        tok = m.group(0)
+        left = masked[m.start() - 1] if m.start() > 0 else ""
+        right = masked[m.end()] if m.end() < len(masked) else ""
+        if not _is_garble_token(tok, left, right):
+            continue
+        # 删除时把紧邻的一侧空格一起带走，避免留下空洞
+        start, end = m.start(), m.end()
+        if right == " ":
+            end += 1
+        elif left == " ":
+            start -= 1
+        removed = text[start:end]
+        issues.append(
+            _issue(
+                "warning",
+                f"第 {m.start() + 1}–{m.end()} 字",
+                f"疑似乱码「{tok}」",
+                "这串字母在中文句子中没有含义，像是误触键盘留下的",
+                f"删掉「{tok}」",
+                text[max(0, m.start() - 8): m.end() + 8],
+                pos=m.start(),
+                fix="",
+                fix_from=removed,
+            )
+        )
+
+    return issues
+
 # ---------------------------------------------------------------- ⑦ 事实类（需模型）
 
 FACT_CHECK_HINT = (
@@ -940,6 +1077,7 @@ def analyze(text: str, use_model: bool = False, model: str | None = None) -> dic
     issues += check_redundant(text)
     issues += check_contradiction(text)
     issues += check_time_clues(text)
+    issues += check_garbled(text)
 
     fact_state = "off"
     if use_model:

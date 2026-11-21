@@ -26,10 +26,11 @@ import sys
 import time
 import traceback
 import uuid
+from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 SERVICE_NAME = os.getenv("LITEOFFICE_SERVICE_NAME", "liteoffice-agent")
 
@@ -209,7 +210,7 @@ class BoundLogger:
         self._logger = logger
         self._fields = fields or {}
 
-    def child(self, **fields: Any) -> "BoundLogger":
+    def child(self, **fields: Any) -> BoundLogger:
         return BoundLogger(self._logger, {**self._fields, **fields})
 
     def _log(self, level: int, event: str, exc_info: bool = False, **fields: Any) -> None:

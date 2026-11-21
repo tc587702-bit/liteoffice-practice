@@ -32,6 +32,21 @@ const optionalIssues = computed(() =>
 /** 已判为「不用改」的条目：本地立刻隐藏，同时写入反馈库 */
 const hidden = ref<Set<number>>(new Set())
 
+/** 已经改好的条目：卡片直接消失，不与「不用改」混在一起（那条会写记忆） */
+const done = ref<Set<number>>(new Set())
+
+/** 剩余待处理条数（已改 / 已忽略都不算） */
+const remainingMain = computed(
+  () => mainIssues.value.filter(({ index }) => !hidden.value.has(index) && !done.value.has(index)).length,
+)
+const remainingOptional = computed(
+  () =>
+    optionalIssues.value.filter(({ index }) => !hidden.value.has(index) && !done.value.has(index)).length,
+)
+const allClear = computed(
+  () => remainingMain.value === 0 && remainingOptional.value === 0 && props.report.issues.length > 0,
+)
+
 async function dismissIssue(it: ImproveIssue, index: number) {
   const ok = await sendIssueFeedback({
     fingerprint: props.report.fingerprint ?? '',
@@ -55,7 +70,8 @@ async function dismissIssue(it: ImproveIssue, index: number) {
  * 常识类问题没有 fix 字段，按钮不出现。
  */
 function applyFix(it: ImproveIssue) {
-  if (!it.fix || it.block === null || it.block === undefined) return
+  // fix 允许是空串：那表示「删掉这一段」（如清理乱码）
+  if (it.fix === undefined || it.fix === null || it.block === null || it.block === undefined) return
 
   // 片段标记会把文本节点切开，先清标记再按纯文本替换。
   // 替换内部只认纯文本坐标，并在写完后回读校验 —— 失败会如实返回，不再谎报"已修改"。
@@ -71,6 +87,12 @@ function applyFix(it: ImproveIssue) {
   // 校验：这一段现在确实包含改后的文字，否则视为失败（避免"改过之后还说有问题"）
   const after = getBlockText(it.block)
   const needle = (it.fix ?? '').trim()
+  // 删除型修复：校验原文片段确实没了
+  if (!needle && it.fixFrom && after.includes(it.fixFrom)) {
+    setStatus(props.report.issues.indexOf(it), false, '写入后原文片段仍在，请重试')
+    window.dispatchEvent(new CustomEvent('lo:fix-failed', { detail: { message: '写入校验失败' } }))
+    return
+  }
   if (needle && !after.includes(needle.slice(0, Math.min(needle.length, 8)))) {
     setStatus(idx, false, '写入后没能在正文里找到改后的文字，请重试')
     window.dispatchEvent(new CustomEvent('lo:fix-failed', { detail: { message: '写入校验失败' } }))
@@ -79,6 +101,7 @@ function applyFix(it: ImproveIssue) {
 
   const before = it.fixFrom ?? ''
   const changedChars = Math.max(1, Math.abs((it.fix ?? '').length - before.length) + 1)
+  done.value = new Set(done.value).add(idx)
   setStatus(
     idx,
     true,
@@ -93,7 +116,7 @@ function applyFix(it: ImproveIssue) {
   // 反过来的话选区会被重画打断，光标就"时有时无"。
   clearAfterAction(idx)
 
-  const at = getBlockText(it.block).indexOf(needle)
+  const at = needle ? getBlockText(it.block).indexOf(needle) : -1
   if (at >= 0) {
     focusSpan(it.block, at, needle.length)
     flashSpan(it.block, at, needle.length)
@@ -217,6 +240,7 @@ async function applyRewrite(it: ImproveIssue, index: number) {
       window.dispatchEvent(new CustomEvent('lo:fix-failed', { detail: { message: applied.message } }))
       return
     }
+    done.value = new Set(done.value).add(index)
     setStatus(index, true, '已改写')
     clearAfterAction(index)
     window.dispatchEvent(new CustomEvent('lo:issue-fixed'))
@@ -302,10 +326,16 @@ onBeforeUnmount(() => window.removeEventListener('lo:issue-focus', onIssueFocus 
     </div>
 
     <!-- 问题清单 -->
-    <div v-if="report.issues.length" class="space-y-2">
+    <div
+      v-if="allClear"
+      class="rounded-[10px] border border-[#30D158]/30 bg-[#30D158]/[0.08] px-3 py-2 text-[12px] text-[#7BE495]"
+    >
+      这一轮的问题都处理完了。想确认效果可以点「重新检查」。
+    </div>
+    <div v-if="report.issues.length && !allClear" class="space-y-2">
       <p class="text-[11px] uppercase tracking-wide text-[#636366]">改进建议（{{ report.issues.length }} 条）</p>
       <div
-        v-for="{ it, index: i } in mainIssues.filter(({ index }) => !isHidden(index))"
+        v-for="{ it, index: i } in mainIssues.filter(({ index }) => !isHidden(index) && !done.has(index))"
         :key="i"
         :data-badge="i + 1"
         class="issue-card rounded-[10px] border border-white/[0.08] bg-[#252527] px-3 py-2"
@@ -324,7 +354,7 @@ onBeforeUnmount(() => window.removeEventListener('lo:issue-focus', onIssueFocus 
             <div class="mt-1 flex items-center gap-2">
               <span v-if="it.block !== null" class="text-[10.5px] text-[#0A84FF]">点击定位到该段</span>
               <button
-                v-if="it.fix && it.block !== null"
+                v-if="it.fixFrom !== undefined && it.fix !== undefined && it.block !== null"
                 type="button"
                 class="rounded-full bg-[#0A84FF] px-2 py-0.5 text-[10.5px] font-medium text-white"
                 title="按建议直接改掉这一处"
@@ -333,7 +363,7 @@ onBeforeUnmount(() => window.removeEventListener('lo:issue-focus', onIssueFocus 
                 一键修改
               </button>
               <button
-                v-if="!it.fix && it.block !== null"
+                v-if="(it.fixFrom === undefined || it.fix === undefined) && it.block !== null"
                 type="button"
                 class="rounded-full border border-[#0A84FF]/50 px-2 py-0.5 text-[10.5px] text-[#6FB6FF] hover:bg-[#0A84FF]/15 disabled:opacity-50"
                 :disabled="isRewriting(i)"
@@ -371,12 +401,12 @@ onBeforeUnmount(() => window.removeEventListener('lo:issue-focus', onIssueFocus 
         class="flex w-full items-center justify-between rounded-[10px] border border-white/[0.08] px-3 py-2 text-[11.5px] text-[#98989D] hover:text-[#F5F5F7]"
         @click="showOptional = !showOptional"
       >
-        <span>另有 {{ optionalIssues.length }} 条可选建议（不影响可用性）</span>
+        <span>另有 {{ remainingOptional }} 条可选建议（不影响可用性）</span>
         <span>{{ showOptional ? '收起' : '展开' }}</span>
       </button>
       <div v-if="showOptional" class="mt-2 flex flex-col gap-2">
         <div
-          v-for="{ it, index: i } in optionalIssues.filter(({ index }) => !isHidden(index))"
+          v-for="{ it, index: i } in optionalIssues.filter(({ index }) => !isHidden(index) && !done.has(index))"
           :key="i"
           :data-badge="i + 1"
           class="issue-card rounded-[10px] border border-white/[0.08] px-3 py-2"
@@ -393,7 +423,7 @@ onBeforeUnmount(() => window.removeEventListener('lo:issue-focus', onIssueFocus 
               <p class="mt-1 text-[11.5px] leading-relaxed text-[#A1A1A6]">{{ it.why }}</p>
               <p class="mt-1 text-[11.5px] leading-relaxed text-[#6FB6FF]">改法：{{ it.how }}</p>
               <button
-                v-if="it.fix && it.block !== null"
+                v-if="it.fixFrom !== undefined && it.fix !== undefined && it.block !== null"
                 type="button"
                 class="mt-1 mr-1 rounded-full bg-[#0A84FF] px-2 py-0.5 text-[10.5px] font-medium text-white"
                 @click.stop="applyFix(it)"
