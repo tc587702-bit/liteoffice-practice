@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import TopBar from '../components/app/TopBar.vue'
 import Sidebar from '../components/app/Sidebar.vue'
@@ -7,6 +7,7 @@ import Toolbar from '../components/editor/Toolbar.vue'
 import SheetView from '../components/editor/SheetView.vue'
 import PdfPages from '../components/editor/PdfPages.vue'
 import SlideView from '../components/editor/SlideView.vue'
+import MdSourceEditor from '../components/editor/MdSourceEditor.vue'
 import AppButton from '../components/ui/AppButton.vue'
 import AppIcon from '../components/ui/AppIcon.vue'
 import { useFileDrop } from '../components/app/fileDropContext'
@@ -24,7 +25,12 @@ function elementOf(node: Node | null | undefined): HTMLElement | null {
 
 import { formatSize, KIND_EXT } from '../lib/file'
 import { downloadOriginal, exportDocument, exportTextCopy } from '../lib/exporter'
-import { escapeHtml, htmlToPlainText } from '../lib/markdown'
+import { escapeHtml, htmlToPlainText, renderMarkdown } from '../lib/markdown'
+import { renderMarkdownInWorker } from '../lib/parseClient'
+import { mdSourceActive, registerPreviewFallback } from '../lib/editorViewMode'
+import { createLogger } from '../lib/logger'
+
+const log = createLogger('editor')
 
 /* 大纲层级缩进：全部用静态类名，避免在模板里写内联 style 做布局 */
 const OUTLINE_INDENT = ['pl-[8px]', 'pl-[20px]', 'pl-[32px]', 'pl-[44px]', 'pl-[56px]', 'pl-[68px]']
@@ -65,6 +71,10 @@ const redoDepth = ref(0)
 const reading = ref(false)
 const saving = ref(false)
 const outlineOpen = ref(true)
+/** md 专属：源码编辑 / 渲染预览；其它格式恒为 false，行为不变 */
+const mdSource = ref(false)
+const isMarkdown = computed(() => doc.value?.kind === 'md')
+const isMdSource = computed(() => isMarkdown.value && mdSource.value)
 
 /** 纸面色调：白 / 米 / 暗。纯白长时间看刺眼，浅色指针也会"消失" */
 type PaperTone = 'white' | 'soft' | 'dark'
@@ -100,14 +110,24 @@ onMounted(() => {
   // 记住编辑器里的选区：字体/字号下拉会让编辑器失焦，选区丢了命令就落到文末
   document.addEventListener('selectionchange', saveSelection)
   if (!docs.value.length && loading.value) void store.hydrate()
+  mdSource.value = doc.value?.kind === 'md'
+  // 定位/引用/问题标注需要 `.lo-editor` DOM：源码模式下先切回预览
+  registerPreviewFallback(() => {
+    if (!isMdSource.value) return false
+    mdSource.value = false
+    return true
+  })
   document.addEventListener('selectionchange', refreshMarks)
   syncEditor()
 })
 
 onBeforeUnmount(() => {
+  registerPreviewFallback(null)
+  mdSourceActive.value = false
   document.removeEventListener('selectionchange', refreshMarks)
   document.removeEventListener('selectionchange', saveSelection)
   if (persistTimer) window.clearTimeout(persistTimer)
+  if (mdTimer) window.clearTimeout(mdTimer)
 })
 
 /** 把整篇 HTML 拆成顶层块，供分块渲染与「编辑时只回写已渲染前缀」使用 */
@@ -216,7 +236,11 @@ function syncEditor() {
 
 watch(
   () => doc.value?.id,
-  () => syncEditor(),
+  () => {
+    // 打开 md 默认进源码模式（源码是唯一真相）；其它格式不进这条分支
+    mdSource.value = doc.value?.kind === 'md'
+    syncEditor()
+  },
   { flush: 'post' },
 )
 
@@ -227,6 +251,9 @@ watch(
   () => syncEditor(),
   { flush: 'post' },
 )
+
+/* md 源码模式对 AI 面板可见：源码下没有可划选的 DOM，面板据此禁用选区改写 */
+watch(isMdSource, (value) => { mdSourceActive.value = value }, { immediate: true })
 
 /** 滚到接近底部/顶部时继续加载，保证任意位置都能滚到（内容 100% 可访问） */
 function onEditorScroll() {
@@ -325,6 +352,58 @@ function onSelectionChange() {
 }
 
 /** 无选区时恢复保存的选区；再没有就把光标放入编辑区，保证工具栏命令可用 */
+
+  /* ---------------- md 源码编辑：源码是唯一真相，html 始终由源码派生 ---------------- */
+  let mdTimer: number | null = null
+  let mdRenderSeq = 0
+
+  function onMdInput(value: string) {
+    if (!doc.value) return
+    store.updateDoc(doc.value.id, { markdown: value, dirty: true })
+    if (mdTimer) window.clearTimeout(mdTimer)
+    mdTimer = window.setTimeout(() => {
+      mdTimer = null
+      void renderMarkdownHtml()
+    }, 250)
+  }
+
+  /** 把当前 markdown 渲染回 html；Worker 失败时退回主线程同步渲染 */
+  async function renderMarkdownHtml(): Promise<void> {
+    const target = doc.value
+    if (!target || target.kind !== 'md') return
+    const markdown = target.markdown ?? ''
+    const seq = ++mdRenderSeq
+    try {
+      const nextHtml = await renderMarkdownInWorker(markdown)
+      if (seq === mdRenderSeq && doc.value?.id === target.id) {
+        store.updateDoc(target.id, { html: nextHtml })
+      }
+    } catch (error) {
+      log.warn('Markdown Worker 渲染失败，回退主线程', { error: (error as Error)?.message })
+      try {
+        const nextHtml = renderMarkdown(markdown)
+        if (seq === mdRenderSeq && doc.value?.id === target.id) {
+          store.updateDoc(target.id, { html: nextHtml })
+        }
+      } catch (fallbackError) {
+        log.error('Markdown 渲染失败，保留上一次预览', fallbackError)
+      }
+    }
+  }
+
+  /** 切回预览前先把待渲染改动落定，保证预览与源码一致 */
+  watch(mdSource, async (source) => {
+    if (mdTimer) {
+      window.clearTimeout(mdTimer)
+      mdTimer = null
+    }
+    if (source) return
+    await renderMarkdownHtml()
+    await nextTick()
+    syncEditor()
+  })
+
+  /** 无选区时恢复保存的选区；再没有就把光标放入编辑区，保证工具栏命令可用 */
 function ensureSelection() {
   const node = editorRef.value
   if (!node) return
@@ -531,6 +610,14 @@ async function handleSave() {
   }
   saving.value = true
   try {
+    // md 源码模式：把防抖里没落定的改动先渲染成 html，导出拿到的是最新内容
+    if (isMarkdown.value) {
+      if (mdTimer) {
+        window.clearTimeout(mdTimer)
+        mdTimer = null
+      }
+      await renderMarkdownHtml()
+    }
     const result = await exportDocument(doc.value)
     store.addToast({
       title: result.ok ? '已准备下载' : '保存提示',
@@ -639,7 +726,6 @@ function jumpToHeading(index: number) {
   if (heading) heading.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
-const isMarkdown = computed(() => doc.value?.kind === 'md')
 const isSheet = computed(() => doc.value?.kind === 'xlsx')
 const isBinaryText = computed(() => doc.value?.kind === 'pptx' || doc.value?.kind === 'pdf')
 </script>
@@ -704,6 +790,7 @@ const isBinaryText = computed(() => doc.value?.kind === 'pptx' || doc.value?.kin
             </div>
             <div class="flex flex-wrap items-center gap-1.5">
               <AppButton
+                v-if="!isMarkdown"
                 size="sm"
                 :variant="reading ? 'primary' : 'secondary'"
                 @click="reading = !reading"
@@ -711,6 +798,26 @@ const isBinaryText = computed(() => doc.value?.kind === 'pptx' || doc.value?.kin
                 <AppIcon name="eye" class="h-3.5 w-3.5" />
                 {{ reading ? '退出阅读' : '阅读模式' }}
               </AppButton>
+              <template v-if="isMarkdown">
+                <AppButton
+                  size="sm"
+                  :variant="mdSource ? 'primary' : 'secondary'"
+                  title="直接编辑 Markdown 源码"
+                  @click="mdSource = true"
+                >
+                  <AppIcon name="code-2" class="h-3.5 w-3.5" />
+                  源码
+                </AppButton>
+                <AppButton
+                  size="sm"
+                  :variant="mdSource ? 'secondary' : 'primary'"
+                  title="只读查看渲染结果"
+                  @click="mdSource = false"
+                >
+                  <AppIcon name="eye" class="h-3.5 w-3.5" />
+                  预览
+                </AppButton>
+              </template>
               <AppButton size="sm" variant="secondary" @click="outlineOpen = !outlineOpen">
                 <AppIcon name="columns-3" class="h-3.5 w-3.5" />
                 大纲
@@ -812,7 +919,7 @@ const isBinaryText = computed(() => doc.value?.kind === 'pptx' || doc.value?.kin
 
             <div v-else class="flex min-w-0 flex-1 flex-col">
               <Toolbar
-                v-if="!reading"
+                v-if="!reading && !isMarkdown"
                 :disabled="false"
                 :active="activeMarks"
                 :can-undo="undoDepth > 0"
@@ -836,17 +943,25 @@ const isBinaryText = computed(() => doc.value?.kind === 'pptx' || doc.value?.kin
                       <span class="truncate">{{ doc.name }}</span>
                       <span class="tabular-nums">
                         {{ stats.words }} 词 · {{ stats.chars }} 字
-                        <template v-if="totalBlocks > renderedBlocks">
+                        <template v-if="!isMdSource && totalBlocks > renderedBlocks">
                           · 第 {{ (windowStart + 1).toLocaleString('en-US') }}–{{ windowEnd.toLocaleString('en-US') }} 块 / 共
                           {{ totalBlocks.toLocaleString('en-US') }} 块（滚动继续加载）
                         </template>
                       </span>
                     </div>
+                    <MdSourceEditor
+                      v-if="isMdSource"
+                      :value="doc.markdown ?? ''"
+                      :doc-name="doc.name"
+                      @input="onMdInput"
+                      @save="handleSave"
+                    />
                     <div
+                      v-else
                       ref="editorRef"
                       v-bind="editorA11y"
                       aria-label="文档编辑区"
-                      :contenteditable="!reading"
+                      :contenteditable="!reading && !isMarkdown"
                       spellcheck="false"
                       data-placeholder="在这里开始输入内容…"
                       class="lo-editor lo-word-wrap min-h-[520px] px-8 py-7 outline-none"
@@ -865,9 +980,11 @@ const isBinaryText = computed(() => doc.value?.kind === 'pptx' || doc.value?.kin
                     >
                       <span>
                         {{
-                          isMarkdown
-                            ? 'Markdown 已渲染为安全 HTML，脚本与事件属性不会执行'
-                            : '内容已在本地解析，导出后会自动回读自检'
+                          isMdSource
+                            ? '源码模式：保存时直接写回 Markdown 原文，切到「预览」可看渲染结果'
+                            : isMarkdown
+                              ? 'Markdown 已渲染为安全 HTML（只读预览），脚本与事件属性不会执行'
+                              : '内容已在本地解析，导出后会自动回读自检'
                         }}
                       </span>
                       <span class="tabular-nums">

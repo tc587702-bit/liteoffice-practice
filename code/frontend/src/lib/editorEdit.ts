@@ -4,6 +4,7 @@
  * 走原生选区 + input 事件，让 Editor.vue 的 onInput 接管：
  * 这样替换会进撤销栈、会触发保存，跟用户手打完全一样。
  */
+import { requestPreviewView } from './editorViewMode'
 
 export interface ReplaceResult {
   ok: boolean
@@ -62,7 +63,17 @@ export function hasEditorSelection(): boolean {
 export function focusBlock(index: number): boolean {
   if (!Number.isInteger(index) || index < 0) return false
   const host = document.querySelector('.lo-editor') as HTMLElement | null
-  if (!host) return false
+  if (!host) {
+    // md 源码模式没有富文本 DOM：请编辑器切回预览后再定位，避免「点了没反应」
+    if (previewRetryPending) return false
+    if (!requestPreviewView()) return false
+    previewRetryPending = true
+    requestAnimationFrame(() => {
+      previewRetryPending = false
+      focusBlock(index)
+    })
+    return true
+  }
   const blocks = Array.from(host.children) as HTMLElement[]
   const el = blocks[index]
   if (!el) return false
@@ -79,6 +90,9 @@ export function focusBlock(index: number): boolean {
   sel.addRange(range)
   return true
 }
+
+/** 源码模式切回预览时的重试闸门，防止反复排队 */
+let previewRetryPending = false
 
 /**
  * 保存当前选区（生成改写时调用）。

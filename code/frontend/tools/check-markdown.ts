@@ -1,4 +1,4 @@
-import { renderMarkdown } from './src/lib/markdown.ts'
+import { renderMarkdown } from '../src/lib/markdown.ts'
 
 const cases: Array<{ name: string; input: string; expect: string[] }> = [
   {

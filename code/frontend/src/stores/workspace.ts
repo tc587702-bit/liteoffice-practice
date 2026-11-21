@@ -4,7 +4,7 @@ import { deleteDoc, loadAll, saveDoc, saveSession, type DocRecord } from '../lib
 import { decodeText, detectKind, formatSize, type FileKind } from '../lib/file'
 import { parsePptxRich } from '../lib/pptxLayout'
 import { parseDocx } from '../lib/docx'
-import { escapeHtml } from '../lib/markdown'
+import { escapeHtml, htmlToMarkdown } from '../lib/markdown'
 import {
   inspectXlsxWorkbook,
   parseXlsxFallback,
@@ -138,6 +138,7 @@ async function buildRecord(
       case 'md': {
         const decoded = decodeText(buffer)
         record.markdown = decoded.text
+        record.originalMarkdown = decoded.text
         record.text = decoded.text
         record.encoding = decoded.encoding
         if (decoded.encoding === 'gb18030') notices.push('检测到 GBK/GB18030 编码，已按兼容编码解码')
@@ -222,6 +223,7 @@ async function buildRecord(
         const decoded = decodeText(buffer)
         record.kind = 'md'
         record.markdown = decoded.text
+        record.originalMarkdown = decoded.text
         record.text = decoded.text
         record.html = textToHtml(decoded.text)
         record.originalHtml = record.html
@@ -630,7 +632,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const doc = docs.value.find((item) => item.id === id)
     if (!doc) return
     resetSnapshot.value = { id, html: doc.html }
-    updateDoc(id, { html: doc.originalHtml, dirty: false })
+    const patch: Partial<DocRecord> = { html: doc.originalHtml, dirty: false }
+    // md 的源码是唯一真相，重置时一并还原；老记录没有 originalMarkdown 时用初稿 html 反推
+    if (doc.kind === 'md') {
+      patch.markdown = doc.originalMarkdown ?? htmlToMarkdown(doc.originalHtml)
+    }
+    updateDoc(id, patch)
     docRevision.value += 1
   }
 
@@ -638,7 +645,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   function undoReset(): boolean {
     const snap = resetSnapshot.value
     if (!snap) return false
-    updateDoc(snap.id, { html: snap.html, dirty: true })
+    const cur = docs.value.find((item) => item.id === snap.id)
+    const patch: Partial<DocRecord> = { html: snap.html, dirty: true }
+    if (cur?.kind === 'md') patch.markdown = cur.originalMarkdown ?? htmlToMarkdown(snap.html)
+    updateDoc(snap.id, patch)
     resetSnapshot.value = null
     docRevision.value += 1
     return true
