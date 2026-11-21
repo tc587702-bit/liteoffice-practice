@@ -27,6 +27,8 @@ export interface DocxItem {
   listMarker?: string
   listType?: 'ul' | 'ol'
   rows?: string[][]
+  /** 段落对齐（center/right/both），从 w:jc 读回，渲染时写进 text-align */
+  align?: string
 }
 
 export interface DocxParseResult {
@@ -314,6 +316,58 @@ function extractRunHtml(run: Element, resolveImage: ImageResolver | null, rels: 
   return html
 }
 
+const HIGHLIGHT_WORD_TO_RGB: Record<string, string> = {
+  yellow: 'rgb(255, 255, 0)',
+  green: 'rgb(0, 255, 0)',
+  cyan: 'rgb(0, 255, 255)',
+  magenta: 'rgb(255, 0, 255)',
+  blue: 'rgb(0, 0, 255)',
+  red: 'rgb(255, 0, 0)',
+  darkBlue: 'rgb(0, 0, 128)',
+  lightBlue: 'rgb(51, 153, 255)',
+  darkCyan: 'rgb(0, 128, 128)',
+  darkGreen: 'rgb(0, 128, 0)',
+  darkYellow: 'rgb(128, 128, 0)',
+  gray50: 'rgb(128, 128, 128)',
+  gray25: 'rgb(192, 192, 192)',
+  black: 'rgb(0, 0, 0)',
+  white: 'rgb(255, 255, 255)',
+}
+
+/**
+ * 从一个 run 的 w:rPr 还原行内样式。
+ *
+ * 与 runsFromRunHtml 的写入逻辑严格对称：那边怎么写，这里就怎么读回来。
+ * 不对称的后果是"往返丢格式"——导出看着对，重新打开字体字号全没了。
+ */
+function runStyleFromProps(props: Element | null): string {
+  if (!props) return ''
+  const decl: string[] = []
+
+  const fonts = firstChild(props, 'rFonts')
+  if (fonts) {
+    // 中文名优先走 eastAsia（写入时也是放这个槽位）
+    const name = attr(fonts, 'eastAsia') || attr(fonts, 'ascii') || attr(fonts, 'hAnsi')
+    if (name && name !== 'Times New Roman') decl.push(`font-family:'${name}'`)
+  }
+  const sz = attr(firstChild(props, 'sz'), 'val')
+  if (sz) {
+    const pt = Number(sz) / 2
+    if (pt > 0) decl.push(`font-size:${pt}pt`)
+  }
+  const color = attr(firstChild(props, 'color'), 'val')
+  if (color && /^[0-9a-fA-F]{6}$/.test(color)) decl.push(`color:#${color}`)
+
+  const hl = attr(firstChild(props, 'highlight'), 'val')
+  if (hl && HIGHLIGHT_WORD_TO_RGB[hl]) decl.push(`background-color:${HIGHLIGHT_WORD_TO_RGB[hl]}`)
+  else {
+    const shd = firstChild(props, 'shd')
+    const fill = shd ? attr(shd, 'fill') : ''
+    if (fill && /^[0-9a-fA-F]{6}$/.test(fill) && fill.toLowerCase() !== 'auto') decl.push(`background-color:#${fill}`)
+  }
+  return decl.join(';')
+}
+
 function paragraphRuns(paragraph: Element, resolveImage: ImageResolver | null, rels: Map<string, string>) {
   const runs: DocxRun[] = []
   let html = ''
@@ -333,6 +387,8 @@ function paragraphRuns(paragraph: Element, resolveImage: ImageResolver | null, r
     const italic = !!props && (firstChild(props, 'i') !== null) && attr(firstChild(props, 'i'), 'val') !== '0'
     const underlineEl = props ? firstChild(props, 'u') : null
     const underline = !!underlineEl && attr(underlineEl, 'val') !== 'none'
+    const strike = !!props && firstChild(props, 'strike') !== null && attr(firstChild(props, 'strike'), 'val') !== '0'
+    const vert = attr(firstChild(props, 'vertAlign'), 'val')
     let text = ''
     childElements(run).forEach((child) => {
       if (child.localName === 't') text += child.textContent ?? ''
@@ -344,6 +400,12 @@ function paragraphRuns(paragraph: Element, resolveImage: ImageResolver | null, r
 
     const inner = extractRunHtml(run, resolveImage, rels)
     let wrapped = inner
+    const styleDecl = runStyleFromProps(props)
+    // 有字体/字号/颜色/底色时包 span；execCommand 与导出解析都认这个结构
+    if (styleDecl) wrapped = `<span style="${styleDecl}">${wrapped}</span>`
+    if (strike) wrapped = `<s>${wrapped}</s>`
+    if (vert === 'superscript') wrapped = `<sup>${wrapped}</sup>`
+    else if (vert === 'subscript') wrapped = `<sub>${wrapped}</sub>`
     if (underline) wrapped = `<u>${wrapped}</u>`
     if (italic) wrapped = `<em>${wrapped}</em>`
     if (bold) wrapped = `<strong>${wrapped}</strong>`
@@ -398,10 +460,11 @@ function tableToHtml(table: Element, resolveImage: ImageResolver | null, rels: M
 
 function itemToHtml(item: DocxItem): string {
   if (item.type === 'table' || item.type === 'image') return item.html
-  if (item.level) return `<h${item.level}>${item.html}</h${item.level}>`
-  if (item.listType === 'ol') return `<div class="lo-li" data-list="ol">${item.html}</div>`
-  if (item.listType === 'ul') return `<div class="lo-li" data-list="ul">${item.html}</div>`
-  return item.html ? `<p>${item.html}</p>` : ''
+  const style = item.align ? ` style="text-align:${item.align}"` : ''
+  if (item.level) return `<h${item.level}${style}>${item.html}</h${item.level}>`
+  if (item.listType === 'ol') return `<div class="lo-li" data-list="ol"${style}>${item.html}</div>`
+  if (item.listType === 'ul') return `<div class="lo-li" data-list="ul"${style}>${item.html}</div>`
+  return item.html ? `<p${style}>${item.html}</p>` : ''
 }
 
 interface ListMarker {
@@ -503,6 +566,9 @@ export async function parseDocx(input: ArrayBuffer, options: ParseOptions = {}):
     const numPr = props ? firstChild(props, 'numPr') : null
     const numId = numPr ? attr(firstChild(numPr, 'numId'), 'val') : null
     const ilvlRaw = numPr ? attr(firstChild(numPr, 'ilvl'), 'val') : null
+    // w:jc → CSS text-align（与导出侧 alignXml 严格对称，保证往返保真）
+    const jcVal = props ? attr(firstChild(props, 'jc'), 'val') : null
+    const align = jcVal === 'center' ? 'center' : jcVal === 'right' ? 'right' : jcVal === 'both' || jcVal === 'distribute' ? 'justify' : ''
     const level = headingLevel(paragraph)
     const content = paragraphRuns(paragraph, resolveImage, rels)
     if (!firstParagraph && content.text) firstParagraph = content.text
@@ -523,6 +589,7 @@ export async function parseDocx(input: ArrayBuffer, options: ParseOptions = {}):
         text: content.text,
         listMarker: marker.listMarker,
         listType: marker.listType,
+        align,
       })
       return
     }
@@ -532,7 +599,7 @@ export async function parseDocx(input: ArrayBuffer, options: ParseOptions = {}):
       return
     }
 
-    items.push({ type: 'paragraph', html: content.html, text: content.text, level })
+    items.push({ type: 'paragraph', html: content.html, text: content.text, level, align })
   }
 
   childElements(body).forEach((node) => {
@@ -617,19 +684,167 @@ export interface DocxBlock {
 
 const W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
 
+/* ---------------- run 样式 → w:rPr（导出回写用） ---------------- */
+
+// 中文字体在 OOXML 里走 w:eastAsia：Word 对汉字只认这个槽位，
+// 只写 w:ascii 的话中文会回退到默认字体，等于"改了没生效"。
+function fontSlots(name: string): { ascii: string; hAnsi: string; eastAsia: string } {
+  const cjk = /[\u4e00-\u9fa5]/.test(name)
+  return cjk
+    ? { ascii: 'Times New Roman', hAnsi: 'Times New Roman', eastAsia: name }
+    : { ascii: name, hAnsi: name, eastAsia: name }
+}
+
+const esc = (s: string) =>
+  s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
+// 段落对齐 → w:jc。execCommand('justifyXXX') 写成 text-align 内联样式。
+// center/right/justify 都保真；left 是 Word 默认，省略即可（写 "left" 也合法）。
+function alignXml(el: HTMLElement): string {
+  const ta = (el.style?.textAlign || '').trim().toLowerCase()
+  if (ta === 'center') return '<w:jc w:val="center"/>'
+  if (ta === 'right') return '<w:jc w:val="right"/>'
+  if (ta === 'justify') return '<w:jc w:val="both"/>'
+  return ''
+}
+
+interface RunStyle {
+  b?: boolean
+  i?: boolean
+  u?: boolean
+  strike?: boolean
+  vertAlign?: 'superscript' | 'subscript'
+  font?: string
+  size?: number
+  color?: string
+  highlight?: string
+}
+
+/**
+ * CT_RPr 是 xsd:sequence，元素必须按固定顺序出现：
+ *   rFonts → b → i → strike → color → sz/szCs → highlight → u → shd → vertAlign
+ * 顺序错乱 Word 直接判文件损坏（WPS 宽容，但导出必须按标准来）。
+ * 之前把 rFonts 写在 b/i/u 之后、u 又排在 highlight 之前，正是这个错误。
+ */
+function runPropsXml(style: RunStyle): string {
+  const p: string[] = []
+  if (style.font) {
+    // 中文字体走 eastAsia 槽位，西文名同时填 ascii/hAnsi
+    const s = fontSlots(style.font)
+    p.push(`<w:rFonts w:ascii="${esc(s.ascii)}" w:hAnsi="${esc(s.hAnsi)}" w:eastAsia="${esc(s.eastAsia)}"/>`)
+  }
+  if (style.b) p.push('<w:b/>')
+  if (style.i) p.push('<w:i/>')
+  if (style.strike) p.push('<w:strike/>')
+  const color = colorWord(style.color)
+  if (color) p.push(`<w:color w:val="${color}"/>`)
+  // w:sz 单位是半磅：12pt → 24
+  if (style.size && style.size > 0) {
+    const half = Math.round(style.size * 2)
+    p.push(`<w:sz w:val="${half}"/><w:szCs w:val="${half}"/>`)
+  }
+  // 底色：命中 16 色枚举走 w:highlight，其余走 w:shd 字符底纹。
+  // 浏览器 execCommand 产出的是 rgb(...)，直接当 w:highlight 的枚举值写进去
+  // 是非法 OOXML，Word 会拒绝打开，必须先转换。
+  const hl = highlightWord(style.highlight)
+  if (hl) p.push(`<w:highlight w:val="${hl}"/>`)
+  if (style.u) p.push('<w:u w:val="single"/>')
+  if (!hl) {
+    const shade = colorWord(style.highlight)
+    if (shade) p.push(`<w:shd w:val="clear" w:color="auto" w:fill="${shade}"/>`)
+  }
+  if (style.vertAlign) p.push(`<w:vertAlign w:val="${style.vertAlign}"/>`)
+  return p.length ? `<w:rPr>${p.join('')}</w:rPr>` : ''
+}
+
+// style 属性 → 样式对象（字体/字号/颜色/高亮）。
+// execCommand 的 fontName / fontSize / foreColor / hiliteColor 都落在这里。
+// fontSize 浏览器写成 "xx-small…xxx-large" 或 "7"（1–10 号），需换算成磅值。
+const CSS_SIZE_PT: Record<string, number> = {
+  'xx-small': 7, 'x-small': 8, small: 9, medium: 12, large: 14, 'x-large': 18, 'xx-large': 24, 'xxx-large': 32,
+  '1': 8, '2': 10, '3': 12, '4': 14, '5': 18, '6': 24, '7': 32,
+}
+
+function styleToRun(el: HTMLElement, style: RunStyle): RunStyle {
+  const next: RunStyle = { ...style }
+  const st = el.style as CSSStyleDeclaration
+  const fam = st.fontFamily?.trim()
+  if (fam) next.font = fam.replace(/^["']|["']$/g, '').split(',')[0].trim()
+  const fs = st.fontSize?.trim()
+  if (fs) {
+    if (fs.endsWith('pt')) next.size = parseFloat(fs) || undefined
+    else if (fs.endsWith('px')) next.size = Math.round((parseFloat(fs) / 96) * 72 * 2) / 2
+    else next.size = CSS_SIZE_PT[fs] ?? (Number(fs) ? CSS_SIZE_PT[String(Math.round(Number(fs)))] : undefined)
+  }
+  if (st.color) next.color = st.color
+  const bg = st.backgroundColor
+  if (bg && bg !== 'transparent' && !/^rgba\(0, 0, 0, 0\)$/.test(bg)) next.highlight = bg
+  const deco = st.textDecorationLine || st.textDecoration || ''
+  if (deco.includes('line-through')) next.strike = true
+  // 浏览器实测（Chrome 144）：styleWithCSS 下 execCommand('superscript/subscript')
+  // 产出 <span style="vertical-align:super/sub">，不是 <sup>/<sub> 标签。
+  // 只认标签会让真实编辑器的上下标导出 Word 时静默丢失（w:vertAlign 写不出来）。
+  const va = st.verticalAlign?.trim().toLowerCase()
+  if (va === 'super' || va === 'superscript') next.vertAlign = 'superscript'
+  else if (va === 'sub' || va === 'subscript') next.vertAlign = 'subscript'
+  return next
+}
+
+// CSS 颜色 → Word 认识的写法。
+// w:highlight 只接受 16 个枚举词；任意颜色（含 execCommand 产出的 rgb()）
+// 走 w:shading 字符底纹，Word/WPS 都保真。
+const HIGHLIGHT_BY_RGB: Record<string, string> = {
+  'rgb(255, 255, 0)': 'yellow',
+  '#ffff00': 'yellow',
+  'rgb(0, 255, 255)': 'cyan',
+  '#00ffff': 'cyan',
+  'rgb(0, 255, 0)': 'green',
+  '#00ff00': 'green',
+  'rgb(255, 0, 255)': 'magenta',
+  '#ff00ff': 'magenta',
+  'rgb(0, 0, 255)': 'blue',
+  '#0000ff': 'blue',
+  'rgb(255, 0, 0)': 'red',
+  '#ff0000': 'red',
+  'rgb(128, 128, 128)': 'gray50',
+  '#808080': 'gray50',
+  'rgb(192, 192, 192)': 'gray25',
+  '#c0c0c0': 'gray25',
+  'rgb(0, 0, 0)': 'black',
+  '#000000': 'black',
+}
+
+function toHex(color: string): string {
+  const c = color.trim().toLowerCase()
+  if (/^#[0-9a-f]{6}$/.test(c)) return c.slice(1)
+  if (/^#[0-9a-f]{3}$/.test(c)) return c.slice(1).split('').map((x) => x + x).join('')
+  const m = /rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/.exec(c)
+  if (m) return [1, 2, 3].map((i) => Number(m[i]).toString(16).padStart(2, '0')).join('')
+  return ''
+}
+
+function colorWord(color: string | undefined): string {
+  const hex = color ? toHex(String(color)) : ''
+  return hex && /^[0-9a-f]{6}$/.test(hex) ? hex : ''
+}
+
+function highlightWord(color: string | undefined): string {
+  if (!color) return ''
+  return HIGHLIGHT_BY_RGB[String(color).trim().toLowerCase()] ?? ''
+}
+
 function runsFromRunHtml(html: string, ctx?: BuildContext): string {
-  // 极简解析 <strong>/<em>/<u> 包装，以 w:rPr 表达格式
+  // 解析 <strong>/<em>/<u> 与 <span style=...> / <sub>/<sup> / <s>，以 w:rPr 表达格式
   const doc = new DOMParser().parseFromString(`<div id="r">${html}</div>`, 'text/html')
   const root = doc.getElementById('r')
   if (!root) return ''
   const out: string[] = []
-  const walk = (node: Node, style: { b?: boolean; i?: boolean; u?: boolean }) => {
+  const walk = (node: Node, style: RunStyle) => {
     node.childNodes.forEach((child) => {
       if (child.nodeType === 3) {
         const text = child.textContent ?? ''
         if (!text) return
-        const props = [style.b ? '<w:b/>' : '', style.i ? '<w:i/>' : '', style.u ? '<w:u w:val="single"/>' : ''].join('')
-        const rPr = props ? `<w:rPr>${props}</w:rPr>` : ''
+        const rPr = runPropsXml(style)
         out.push(`<w:r>${rPr}<w:t xml:space="preserve">${escapeXml(text)}</w:t></w:r>`)
         return
       }
@@ -644,11 +859,21 @@ function runsFromRunHtml(html: string, ctx?: BuildContext): string {
         out.push(imageRunXml(el, ctx))
         return
       }
-      walk(el, {
-        b: style.b || tag === 'strong' || tag === 'b',
-        i: style.i || tag === 'em' || tag === 'i',
-        u: style.u || tag === 'u',
-      })
+      let next = styleToRun(el, style)
+      if (tag === 'strong' || tag === 'b') next = { ...next, b: true }
+      if (tag === 'em' || tag === 'i') next = { ...next, i: true }
+      if (tag === 'u') next = { ...next, u: true }
+      if (tag === 's' || tag === 'strike' || tag === 'del') next = { ...next, strike: true }
+      if (tag === 'sub') next = { ...next, vertAlign: 'subscript' }
+      if (tag === 'sup') next = { ...next, vertAlign: 'superscript' }
+      // execCommand('fontSize') 常产出 <font size="7">，不是 style
+      if (tag === 'font') {
+        const fa = el.getAttribute('face')
+        const fz = el.getAttribute('size')
+        if (fa) next = { ...next, font: fa }
+        if (fz) next = { ...next, size: CSS_SIZE_PT[fz] ?? next.size }
+      }
+      walk(el, next)
     })
   }
   walk(root, {})
@@ -906,19 +1131,23 @@ export function buildDocx(html: string, title = '文档', report?: DocxExportRep
       if (node.nodeType !== 1) return
       const el = node as HTMLElement
       const tag = el.tagName.toLowerCase()
+      const align = alignXml(el)
       const heading = /^h([1-6])$/.exec(tag)
       if (heading) {
         const level = Number(heading[1])
+        // CT_PPr 有严格元素顺序：pStyle → jc → outlineLvl。
+        // jc 放 outlineLvl 之后 Word 会判文件损坏，不是"能用但样式丢"。
         bodyXml.push(
-          `<w:p><w:pPr><w:pStyle w:val="Heading${level}"/><w:outlineLvl w:val="${level - 1}"/></w:pPr>${runsFromRunHtml(el.innerHTML, ctx)}</w:p>`,
+          `<w:p><w:pPr><w:pStyle w:val="Heading${level}"/>${align}<w:outlineLvl w:val="${level - 1}"/></w:pPr>${runsFromRunHtml(el.innerHTML, ctx)}</w:p>`,
         )
         return
       }
       if (tag === 'ul' || tag === 'ol') {
         const numId = tag === 'ol' ? 2 : 1
         Array.from(el.querySelectorAll('li')).forEach((li) => {
+          // 同样按 CT_PPr 顺序：numPr 在 jc 之前
           bodyXml.push(
-            `<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="${numId}"/></w:numPr></w:pPr>${runsFromRunHtml(li.innerHTML, ctx)}</w:p>`,
+            `<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="${numId}"/></w:numPr>${alignXml(li)}</w:pPr>${runsFromRunHtml(li.innerHTML, ctx)}</w:p>`,
           )
         })
         return
@@ -953,7 +1182,8 @@ export function buildDocx(html: string, title = '文档', report?: DocxExportRep
         return
       }
       const runs = runsFromRunHtml(el.innerHTML, ctx)
-      if (runs) bodyXml.push(`<w:p>${runs}</w:p>`)
+      const pPr = align ? `<w:pPr>${align}</w:pPr>` : ''
+      if (runs) bodyXml.push(`<w:p>${pPr}${runs}</w:p>`)
     })
   }
   if (!bodyXml.length) bodyXml.push(`<w:p><w:r><w:t>${escapeXml(title)}</w:t></w:r></w:p>`)

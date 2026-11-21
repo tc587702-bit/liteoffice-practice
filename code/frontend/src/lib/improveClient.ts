@@ -5,12 +5,17 @@
  * → { ok, dims, issues, summary, docStats }
  */
 import { AGENT_BASE } from './agentClient'
-import { focusBlock } from './editorEdit'
+import { flashSpan, focusBlock, focusSpan } from './editorEdit'
 
 export type IssueLevel = 'error' | 'warning' | 'info'
 
 export interface ImproveIssue {
   /** 规则名（反馈记忆用它做键） */
+  /** 错误片段在段内的精确位置：只高亮这几个字 */
+  span?: { start: number; len: number } | null
+  /** 规则层给出的改后文本（可直接替换）；没有则说明这条不能自动改 */
+  fix?: string
+  fixFrom?: string
   rule?: string
   ruleId?: string
   level: IssueLevel
@@ -54,11 +59,15 @@ export interface ImproveReport {
   genre?: string
 }
 
-export async function checkDocument(html: string, signal?: AbortSignal): Promise<ImproveReport> {
+export async function checkDocument(
+  html: string,
+  options: { genre?: string; useModel?: boolean } = {},
+  signal?: AbortSignal,
+): Promise<ImproveReport> {
   const res = await fetch(`${AGENT_BASE}/v1/doc/improve`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ html }),
+    body: JSON.stringify({ html, genre: options.genre, useModel: options.useModel === true }),
     signal,
   })
   if (!res.ok) {
@@ -71,16 +80,49 @@ export async function checkDocument(html: string, signal?: AbortSignal): Promise
  * 定位到编辑区第 index 个块（0 起）：
  * 滚动到视野中央 + 把光标放进段首 + 高亮 1.6 秒。
  */
-export function locateBlock(index: number | null): boolean {
+export function locateBlock(
+  index: number | null,
+  span?: { start: number; len: number } | null,
+  quote?: string | null,
+): boolean {
   if (index === null || index < 0) return false
-  const ok = focusBlock(index)
-  if (!ok) return false
+
+  // 有精确位置就只闪那几个字；没有才退回整段闪烁
   const editor = document.querySelector('.lo-editor')
-  const el = editor ? (Array.from(editor.children)[index] as HTMLElement | undefined) : undefined
-  if (el) {
-    el.classList.add('lo-locate-flash')
-    window.setTimeout(() => el.classList.remove('lo-locate-flash'), 1600)
+  const blockEl = editor ? (Array.from(editor.children)[index] as HTMLElement | undefined) : undefined
+  if (!blockEl) return false
+  const blockText = blockEl.textContent || ''
+
+  // ① 精确 span：把光标放过去，并只闪这几个字
+  let start = -1
+  let len = 0
+  if (span && Number.isInteger(span.start) && span.start >= 0) {
+    start = span.start
+    len = span.len || 1
+  } else if (quote && quote.trim()) {
+    // ② 没有 span 就用引文：在段落里找它的位置
+    const key = quote.trim().slice(0, 20)
+    const at = blockText.indexOf(key)
+    if (at >= 0) {
+      start = at
+      len = key.length
+    }
   }
+
+  blockEl.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  const host = editor as HTMLElement | null
+  host?.focus({ preventScroll: true })
+
+  if (start >= 0) {
+    focusSpan(index, start, len) // 光标落在出错处（不选中整段）
+    if (flashSpan(index, start, len)) return true // 只闪这几个字
+  } else if (!focusBlock(index)) {
+    return false
+  }
+
+  // ③ 兜底：实在对不上位置才闪整段
+  blockEl.classList.add('lo-locate-flash')
+  window.setTimeout(() => blockEl.classList.remove('lo-locate-flash'), 1600)
   return true
 }
 
@@ -146,5 +188,22 @@ export async function reviewStatus(): Promise<{ localAvailable: boolean; model: 
     return (await res.json()) as { localAvailable: boolean; model: string }
   } catch {
     return { localAvailable: false, model: '' }
+  }
+}
+
+
+/** 清掉「不用改」的记忆（让之前跳过的建议重新出现） */
+export async function resetIssueFeedback(fingerprint: string): Promise<number> {
+  try {
+    const res = await fetch(`${AGENT_BASE}/v1/doc/feedback/reset`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fingerprint }),
+    })
+    if (!res.ok) return 0
+    const data = (await res.json()) as { removed?: number }
+    return data.removed ?? 0
+  } catch {
+    return 0
   }
 }

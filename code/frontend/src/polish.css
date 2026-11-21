@@ -20,12 +20,35 @@
   --lo-ease: cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
-/* ---------- 环境光：两束极淡的光，替代原来的径向渐变 ---------- */
+/* ---------- 环境光：青绿主光 + 蓝 + 紫，画面中部横向晕开 ----------
+   2026-11-21 按用户截图取色核对后逐字还原：用户喜欢的就是这版青绿烟感
+   （截图四角取样 G/B 均高于 R）。中途改成的蓝紫版被用户否定，恢复如下。
+   面板是 rgba(28,28,30,0.75) 的玻璃，会把光压到约 1/4，
+   所以这里的 alpha 要比"肉眼期望值"高不少，屏幕上才有那种烟感。 */
 .lo-ambient {
+  background-color: #000;
   background-image:
-    radial-gradient(1200px 600px at 12% -10%, rgba(10, 132, 255, 0.10), transparent 60%),
-    radial-gradient(900px 500px at 88% 110%, rgba(94, 92, 230, 0.08), transparent 62%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.012), transparent 40%);
+    /* 主光：青绿，中偏左，面积大 */
+    radial-gradient(1250px 900px at 30% 44%, rgba(45, 212, 191, 0.34), transparent 66%),
+    /* 次光：青绿细部，让中段更"雾" */
+    radial-gradient(700px 520px at 46% 62%, rgba(34, 197, 158, 0.18), transparent 62%),
+    /* 上方偏右：蓝 */
+    radial-gradient(1050px 700px at 72% 8%, rgba(10, 132, 255, 0.24), transparent 64%),
+    /* 右下：紫 */
+    radial-gradient(900px 700px at 92% 96%, rgba(122, 92, 255, 0.22), transparent 62%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent 46%);
+}
+
+/* 再叠一层模糊柔光，把径向渐变的边界"糊开"，避免出现色带 */
+.lo-ambient::after {
+  content: '';
+  position: absolute;
+  inset: -16%;
+  pointer-events: none;
+  background:
+    radial-gradient(closest-side at 34% 46%, rgba(45, 212, 191, 0.12), transparent 72%),
+    radial-gradient(closest-side at 84% 78%, rgba(94, 92, 230, 0.08), transparent 70%);
+  filter: blur(56px);
 }
 
 /* ---------- 玻璃面板：更薄的白边 + 顶部高光 ---------- */
@@ -34,6 +57,25 @@
   backdrop-filter: var(--lo-glass-blur);
   -webkit-backdrop-filter: var(--lo-glass-blur);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+/* ---------- 强化玻璃：两侧面板专用（用户要求质感更强） ----------
+   底色更透（0.75 → 0.42），让环境光真正透进来；
+   模糊加重并提饱和，光晕透过时是"磨砂玻璃后的彩光"而不是灰雾；
+   顶部高光 + 一圈内描边 + 自上而下的微渐变，模拟玻璃受光面。 */
+.lo-glass-strong {
+  background-color: rgba(24, 24, 27, 0.42);
+  background-image: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.055),
+    rgba(255, 255, 255, 0.018) 32%,
+    transparent 62%
+  );
+  backdrop-filter: blur(28px) saturate(1.45);
+  -webkit-backdrop-filter: blur(28px) saturate(1.45);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.045);
 }
 
 /* ---------- 文档纸面：页边高光 + 柔和投影 ---------- */

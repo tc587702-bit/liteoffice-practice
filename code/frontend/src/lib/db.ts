@@ -1,6 +1,7 @@
 import type { DocxItem } from './docx'
 import type { PersistedSheet } from './xlsx'
-import type { FileKind, PptSlide } from './file'
+import type { FileKind } from './file'
+import type { PptRichSlide } from './pptxLayout'
 
 const DB_NAME = 'liteoffice'
 const DB_VERSION = 1
@@ -27,7 +28,11 @@ export interface DocRecord {
   /** docx 结构化内容，用于精确读取段落数 */
   docxItems?: DocxItem[]
   sheets?: PersistedSheet[]
-  slides?: PptSlide[]
+  slides?: PptRichSlide[]
+  /** 幻灯片页宽高比（4:3 = 1.333，16:9 = 1.778） */
+  slidesAspect?: number
+  /** 幻灯片真实页宽（pt）。字号换算必须用它：16:9 是 960pt，4:3 才是 720pt */
+  slidesWidthPt?: number
   pdfText?: string
   /** PDF 页数与逐页字符数（pdfjs-dist 提取后写入，仅元数据，可安全入库） */
   pdfPageCount?: number

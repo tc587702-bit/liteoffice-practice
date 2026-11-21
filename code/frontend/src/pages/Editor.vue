@@ -6,6 +6,7 @@ import Sidebar from '../components/app/Sidebar.vue'
 import Toolbar from '../components/editor/Toolbar.vue'
 import SheetView from '../components/editor/SheetView.vue'
 import PdfPages from '../components/editor/PdfPages.vue'
+import SlideView from '../components/editor/SlideView.vue'
 import AppButton from '../components/ui/AppButton.vue'
 import AppIcon from '../components/ui/AppIcon.vue'
 import { useFileDrop } from '../components/app/fileDropContext'
@@ -68,9 +69,9 @@ const outlineOpen = ref(true)
 /** 纸面色调：白 / 米 / 暗。纯白长时间看刺眼，浅色指针也会"消失" */
 type PaperTone = 'white' | 'soft' | 'dark'
 const PAPER_TONES: { id: PaperTone; label: string }[] = [
-  { id: 'white', label: '白' },
-  { id: 'soft', label: '米' },
-  { id: 'dark', label: '暗' },
+  { id: 'white', label: '纸白' },
+  { id: 'soft', label: '米黄' },
+  { id: 'dark', label: '夜间' },
 ]
 const paperTone = ref<PaperTone>((localStorage.getItem('lo.paperTone') as PaperTone) || 'dark')
 const paperClass = computed(() => {
@@ -78,12 +79,11 @@ const paperClass = computed(() => {
   if (paperTone.value === 'dark') return 'lo-paper-surface lo-paper-dark'
   return 'lo-paper-surface'
 })
-function cyclePaperTone() {
-  const order: PaperTone[] = ['dark', 'soft', 'white']
-  const next = order[(order.indexOf(paperTone.value) + 1) % order.length]
-  paperTone.value = next
-  localStorage.setItem('lo.paperTone', next)
+function setPaperTone(tone: PaperTone) {
+  paperTone.value = tone
+  localStorage.setItem('lo.paperTone', tone)
 }
+
 // AI 侧栏打开时自动收起大纲：两边各占 248 + 360，正文会被挤得太窄
 watch(aiPanelOpen, (open) => {
   if (open) outlineOpen.value = false
@@ -97,6 +97,8 @@ let skipHistory = false
 let persistTimer: number | null = null
 
 onMounted(() => {
+  // 记住编辑器里的选区：字体/字号下拉会让编辑器失焦，选区丢了命令就落到文末
+  document.addEventListener('selectionchange', saveSelection)
   if (!docs.value.length && loading.value) void store.hydrate()
   document.addEventListener('selectionchange', refreshMarks)
   syncEditor()
@@ -104,6 +106,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   document.removeEventListener('selectionchange', refreshMarks)
+  document.removeEventListener('selectionchange', saveSelection)
   if (persistTimer) window.clearTimeout(persistTimer)
 })
 
@@ -217,6 +220,14 @@ watch(
   { flush: 'post' },
 )
 
+// 正文被整体替换（恢复原稿 / 撤销恢复）时重建分块，
+// 否则列表还显示旧内容，用户会以为"点了没反应"。
+watch(
+  () => store.docRevision,
+  () => syncEditor(),
+  { flush: 'post' },
+)
+
 /** 滚到接近底部/顶部时继续加载，保证任意位置都能滚到（内容 100% 可访问） */
 function onEditorScroll() {
   const scroller = editorScrollRef.value
@@ -291,13 +302,40 @@ function onInput() {
   persistTimer = window.setTimeout(() => refreshMarks(), 120)
 }
 
-/** 无选区时把光标放入编辑区，保证工具栏命令可用 */
+/**
+ * 记住编辑器里最后的选区。
+ *
+ * 字体/字号下拉、取色器会让编辑器失焦，选区随之丢失；
+ * 不存下来，命令就只能落到文末，用户看到的就是「按了没用」。
+ * 按钮类工具靠 mousedown preventDefault 保住选区，不走这里。
+ */
+let savedRange: Range | null = null
+function saveSelection() {
+  const node = editorRef.value
+  const sel = document.getSelection()
+  if (!node || !sel || !sel.rangeCount) return
+  const r = sel.getRangeAt(0)
+  if (node.contains(r.commonAncestorContainer)) savedRange = r.cloneRange()
+}
+
+/** 选区变化：既刷新高亮状态，也存一份供失焦后恢复 */
+function onSelectionChange() {
+  refreshMarks()
+  saveSelection()
+}
+
+/** 无选区时恢复保存的选区；再没有就把光标放入编辑区，保证工具栏命令可用 */
 function ensureSelection() {
   const node = editorRef.value
   if (!node) return
   const select = document.getSelection()
   if (select && select.anchorNode && node.contains(select.anchorNode)) return
   node.focus()
+  if (savedRange && node.contains(savedRange.commonAncestorContainer)) {
+    select?.removeAllRanges()
+    select?.addRange(savedRange)
+    return
+  }
   const range = document.createRange()
   range.selectNodeContents(node)
   range.collapse(false)
@@ -347,6 +385,27 @@ function onEditorClick(event: MouseEvent) {
   window.dispatchEvent(new CustomEvent('lo:issue-focus', { detail: { badge: Number(badge) } }))
 }
 
+/**
+ * execCommand('fontSize') 只有 1–7 档，设不了精确磅值。
+ * 通用做法：先用最大档打标（styleWithCSS 下浏览器写成 xxx-large），
+ * 再把刚打过标的 span 换成磅值。只影响本次打的标，历史 span 不动。
+ */
+function applyFontSize(pt: number) {
+  if (!(pt >= 5 && pt <= 72)) return
+  document.execCommand('fontSize', false, '7')
+  const node = editorRef.value
+  if (!node) return
+  node.querySelectorAll<HTMLElement>('span').forEach((el) => {
+    if (el.style.fontSize === 'xxx-large' || el.style.fontSize === '') {
+      // 空值不处理：那是别的 span，本次打标一定带 xxx-large
+      if (el.style.fontSize === 'xxx-large') {
+        el.style.fontSize = `${pt}pt`
+        el.removeAttribute('size')
+      }
+    }
+  })
+}
+
 function onCommand(command: string) {
   if (!doc.value) return
   if (command === 'undo') {
@@ -370,45 +429,74 @@ function onCommand(command: string) {
     return
   }
   ensureSelection()
+  // 统一用 inline style（产出 <span style=...>），与导出侧 styleToRun 的读取对齐，
+  // 往返保真；否则浏览器可能生成 <font> 等老标签，解析路径不一致。
+  try {
+    document.execCommand('styleWithCSS', false, 'true')
+  } catch {
+    /* 老浏览器忽略 */
+  }
   const before = doc.value.html
   try {
-    switch (command) {
-      case 'bold':
-        document.execCommand('bold')
-        break
-      case 'italic':
-        document.execCommand('italic')
-        break
-      case 'underline':
-        document.execCommand('underline')
-        break
-      case 'ul':
-        document.execCommand('insertUnorderedList')
-        break
-      case 'ol':
-        document.execCommand('insertOrderedList')
-        break
-      case 'h1':
-        document.execCommand('formatBlock', false, 'h1')
-        break
-      case 'h2':
-        document.execCommand('formatBlock', false, 'h2')
-        break
-      case 'p':
-        document.execCommand('formatBlock', false, 'p')
-        break
-      case 'quote':
-        document.execCommand('formatBlock', false, 'blockquote')
-        break
-      case 'pre':
-        document.execCommand('formatBlock', false, 'pre')
-        break
-      case 'hr':
-        document.execCommand('insertHorizontalRule')
-        break
-      default:
-        return
-    }
+    // 带参数的命令：font:宋体 / size:12 / color:#FF0000 / hl:yellow / align:center
+    const [head, ...rest] = command.split(':')
+    const arg = rest.join(':')
+    if (head === 'font' || head === 'size' || head === 'color' || head === 'hl' || head === 'align') {
+      if (!arg) return
+      if (head === 'font') document.execCommand('fontName', false, arg)
+      else if (head === 'size') applyFontSize(Number(arg))
+      else if (head === 'color') document.execCommand('foreColor', false, arg)
+      else if (head === 'hl') {
+        // 各浏览器对这个命令名实现不一，两个都试
+        if (!document.execCommand('hiliteColor', false, arg)) document.execCommand('backColor', false, arg)
+      } else document.execCommand(`justify${arg[0].toUpperCase()}${arg.slice(1)}` as 'justifyLeft')
+    } else
+      switch (command) {
+        case 'bold':
+          document.execCommand('bold')
+          break
+        case 'italic':
+          document.execCommand('italic')
+          break
+        case 'underline':
+          document.execCommand('underline')
+          break
+        case 'strike':
+          document.execCommand('strikeThrough')
+          break
+        case 'sup':
+          document.execCommand('superscript')
+          break
+        case 'sub':
+          document.execCommand('subscript')
+          break
+        case 'ul':
+          document.execCommand('insertUnorderedList')
+          break
+        case 'ol':
+          document.execCommand('insertOrderedList')
+          break
+        case 'h1':
+          document.execCommand('formatBlock', false, 'h1')
+          break
+        case 'h2':
+          document.execCommand('formatBlock', false, 'h2')
+          break
+        case 'p':
+          document.execCommand('formatBlock', false, 'p')
+          break
+        case 'quote':
+          document.execCommand('formatBlock', false, 'blockquote')
+          break
+        case 'pre':
+          document.execCommand('formatBlock', false, 'pre')
+          break
+        case 'hr':
+          document.execCommand('insertHorizontalRule')
+          break
+        default:
+          return
+      }
   } catch {
     store.addToast({ title: '该操作在当前选区不可用', tone: 'warning' })
     return
@@ -465,6 +553,39 @@ function handleOriginal() {
     title: result.ok ? '已下载原始文件' : '无法下载',
     description: result.message,
     tone: result.ok ? 'success' : 'warning',
+  })
+}
+
+
+/** 恢复原稿：先确认，再回滚；回滚后顶部出现「撤销恢复」 */
+async function handleResetToOriginal() {
+  const current = doc.value
+  if (!current) return
+  const changed = Math.abs((current.html ?? '').length - (current.originalHtml ?? '').length)
+  const ok = await store.askConfirm({
+    title: '恢复原稿？',
+    description: '将把正文回滚到导入时的内容，打开后的所有修改都会消失。',
+    detail: [
+      `当前正文约 ${(current.html ?? '').length} 字符，原稿约 ${(current.originalHtml ?? '').length} 字符（差 ${changed}）。`,
+      '回滚后顶部会出现「撤销恢复」，可退回一次；确认保存下载后不再保留。',
+    ],
+    confirmText: '恢复原稿',
+    cancelText: '取消',
+  })
+  if (!ok) return
+  store.resetDoc(current.id)
+  store.addToast({
+    title: '已恢复到导入时的内容',
+    description: '如需退回，点顶部「撤销恢复」',
+    tone: 'info',
+  })
+}
+
+function handleUndoReset() {
+  const done = store.undoReset()
+  store.addToast({
+    title: done ? '已撤销恢复' : '没有可撤销的恢复记录',
+    tone: done ? 'info' : 'warning',
   })
 }
 
@@ -594,15 +715,29 @@ const isBinaryText = computed(() => doc.value?.kind === 'pptx' || doc.value?.kin
                 <AppIcon name="columns-3" class="h-3.5 w-3.5" />
                 大纲
               </AppButton>
-              <AppButton
-                size="sm"
-                variant="secondary"
-                :title="`纸面色调：${PAPER_TONES.find((t) => t.id === paperTone)?.label}（点击切换 白/米/暗）`"
-                @click="cyclePaperTone()"
+              <!-- 纸面色调：三档直接选，当前档高亮（原来单按钮循环，看不出当前是哪档） -->
+              <div
+                class="flex items-center gap-0.5 rounded-full border border-white/[0.08] bg-white/[0.04] p-0.5"
+                role="radiogroup"
+                aria-label="纸面色调"
               >
-                <AppIcon name="file-text" class="h-3.5 w-3.5" />
-                {{ PAPER_TONES.find((t) => t.id === paperTone)?.label }}
-              </AppButton>
+                <button
+                  v-for="tone in PAPER_TONES"
+                  :key="tone.id"
+                  type="button"
+                  class="rounded-full px-2.5 py-1 text-[11.5px] transition-colors"
+                  :class="
+                    paperTone === tone.id
+                      ? 'bg-[#0A84FF] font-medium text-white'
+                      : 'text-[#98989D] hover:text-[#F5F5F7]'
+                  "
+                  :title="`纸面色调：${tone.label}`"
+                  :aria-pressed="paperTone === tone.id"
+                  @click="setPaperTone(tone.id)"
+                >
+                  {{ tone.label }}
+                </button>
+              </div>
               <AppButton size="sm" variant="secondary" :disabled="saving" @click="handleSave">
                 <AppIcon name="save" class="h-3.5 w-3.5" />
                 保存下载
@@ -617,9 +752,18 @@ const isBinaryText = computed(() => doc.value?.kind === 'pptx' || doc.value?.kin
                   原始文件
                 </AppButton>
               </template>
-              <AppButton size="sm" variant="secondary" @click="store.resetDoc(doc.id)">
+              <AppButton
+                v-if="store.resetSnapshot?.id === doc.id"
+                size="sm"
+                variant="secondary"
+                @click="handleUndoReset"
+              >
                 <AppIcon name="undo-2" class="h-3.5 w-3.5" />
-                重置编辑
+                撤销恢复
+              </AppButton>
+              <AppButton v-else size="sm" variant="secondary" @click="handleResetToOriginal">
+                <AppIcon name="file-warning" class="h-3.5 w-3.5" />
+                恢复原稿
               </AppButton>
             </div>
           </div>
@@ -677,11 +821,14 @@ const isBinaryText = computed(() => doc.value?.kind === 'pptx' || doc.value?.kin
               />
               <div
                 ref="editorScrollRef"
-                class="thin-scroll min-h-0 flex-1 overflow-y-auto bg-[#0B0B0C] px-4 py-5"
+                class="thin-scroll min-h-0 flex-1 overflow-y-auto px-6 py-5"
                 @scroll.passive="onEditorScroll"
               >
                 <PdfPages v-if="doc.kind === 'pdf'" :key="doc.id" :doc="doc" />
-                <div class="mx-auto max-w-[860px]">
+                <SlideView v-else-if="doc.kind === 'pptx'" :key="doc.id" :doc="doc" />
+                <!-- 纸面固定 860px 舒适行宽（用户指定）；
+                     两侧不是纯黑底，透出主界面环境光，全屏也不显死黑 -->
+                <div v-else class="mx-auto max-w-[860px]">
                   <div class="rounded-[20px] shadow-[0_24px_60px_-30px_rgba(0,0,0,0.9)]" :class="paperClass">
                     <div
                       class="flex items-center justify-between gap-3 border-b border-[#EDEDF0] px-8 py-3 text-[11px] text-[#98989D]"
@@ -708,9 +855,10 @@ const isBinaryText = computed(() => doc.value?.kind === 'pptx' || doc.value?.kin
                       @keydown="onEditorKeydown"
                       @click="onEditorClick"
                       @paste="onPaste"
-                      @keyup="refreshMarks"
-                      @mouseup="refreshMarks"
+                      @keyup="onSelectionChange"
+                      @mouseup="onSelectionChange"
                       @focus="refreshMarks"
+                      @blur="saveSelection"
                     />
                     <div
                       class="flex flex-wrap items-center justify-between gap-2 border-t border-[#EDEDF0] px-8 py-2.5 text-[11px] text-[#98989D]"
@@ -734,7 +882,7 @@ const isBinaryText = computed(() => doc.value?.kind === 'pptx' || doc.value?.kin
 
             <aside
               v-if="outlineOpen"
-              class="lo-glass hidden w-[248px] shrink-0 flex-col border-l border-white/[0.06] lg:flex"
+              class="lo-glass lo-glass-strong hidden w-[248px] shrink-0 flex-col border-l border-white/[0.06] lg:flex"
             >
               <div class="border-b border-white/[0.06] px-4 py-3">
                 <div class="flex items-center justify-between">

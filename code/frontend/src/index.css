@@ -593,7 +593,11 @@ body {
 /* 检查报告里点「定位」时，对应段落闪一下 */
 .lo-locate-flash {
   animation: lo-locate 1.6s ease-out;
-  border-radius: 6px;
+  border-radius: 4px;
+  /* 闪的往往只有 1~2 个字，靠 padding 撑开再加一圈描边才看得见 */
+  padding: 0 2px;
+  margin: 0 -2px;
+  box-shadow: 0 0 0 1.5px rgba(10, 132, 255, 0.55);
 }
 @keyframes lo-locate {
   0% { background-color: rgba(10, 132, 255, 0.28); }
@@ -661,9 +665,17 @@ body {
   --lo-paper-ink: #1d1d1f;
 }
 .lo-paper-soft {
-  --lo-paper: #f6f4ef;      /* 米：护眼，长时间看不刺 */
-  --lo-paper-ink: #23211c;
+  /* 米黄纸：原来 #f6f4ef 与纯白只差 3% 亮度，切换时几乎看不出变化。
+     改成明确的暖米黄（接近 80g 打印纸），配暖黑文字，长时间看不刺眼。 */
+  --lo-paper: #f2e7cd;
+  --lo-paper-ink: #3a332a;
 }
+.lo-paper-surface.lo-paper-soft {
+  box-shadow:
+    0 0 0 1px rgba(150, 120, 70, 0.12),
+    0 26px 60px -34px rgba(90, 64, 24, 0.55);
+}
+
 .lo-paper-dark {
   --lo-paper: #141416;      /* 暗：近黑，配白字，浅色指针也看得见 */
   --lo-paper-ink: #f2f2f5;
@@ -717,4 +729,56 @@ body {
 @keyframes lo-locate-dark {
   0% { background-color: rgba(10, 132, 255, 0.45); }
   100% { background-color: transparent; }
+}
+
+/* 整段级标记（长句/长段落/整段重复）：只给左侧一条细竖线 + 角标，不铺底色。
+   以前整段铺黄底，一段两百字看起来像被"选中"，且改一处就全段消失。 */
+.lo-issue-mark.lo-issue-block {
+  background-color: transparent;
+  border-left: 2px solid rgba(255, 179, 64, 0.55);
+  padding-left: 8px;
+  margin-left: -10px;
+}
+.lo-issue-mark.lo-issue-block.lo-issue-error {
+  border-left-color: rgba(255, 69, 58, 0.6);
+}
+.lo-issue-mark.lo-issue-block.lo-issue-info {
+  border-left-color: rgba(152, 152, 157, 0.5);
+}
+
+/* 片段级标记：只高亮错的那几个字（整段标记用的是 border-left + 背景） */
+.lo-issue-mark.lo-issue-inline {
+  position: relative;
+  padding: 0 1px;
+  border-left: none;
+  border-radius: 3px;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+}
+.lo-issue-inline.lo-issue-error {
+  background-color: rgba(255, 69, 58, 0.28);
+  border-bottom-color: #ff453a;
+}
+.lo-issue-inline.lo-issue-warning {
+  background-color: rgba(255, 179, 64, 0.26);
+  border-bottom-color: #ffb340;
+}
+.lo-issue-inline.lo-issue-info {
+  background-color: rgba(255, 255, 255, 0.12);
+  border-bottom-color: #98989d;
+}
+/* 片段标记不显示右下角数字气泡（太挤），数字留在卡片上 */
+.lo-issue-mark.lo-issue-inline::after {
+  content: none;
+}
+
+/* 一键修改后闪一下：让"只改了一个字"也能被看见 */
+@keyframes lo-fix-pulse {
+  0% { background-color: rgba(48, 209, 88, 0); }
+  25% { background-color: rgba(48, 209, 88, 0.28); }
+  100% { background-color: rgba(48, 209, 88, 0); }
+}
+.lo-fix-flash {
+  animation: lo-fix-pulse 1.8s ease-out;
+  border-radius: 4px;
 }

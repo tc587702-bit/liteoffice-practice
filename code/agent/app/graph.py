@@ -891,6 +891,37 @@ def build_graph():
 GRAPH = build_graph()
 
 
+
+# 请求「往正文里塞代码」：与文体不符，且我们无法验证代码正确性 → 一律拒绝
+_CODE_REQUEST_RE = re.compile(
+    r"(加|插入|追加|补|写|生成|来).{0,6}(代码|脚本|程序|函数|SQL|sql|Python|python|Java|javascript)",
+    re.IGNORECASE,
+)
+_CODE_BLOCK_RE = re.compile(r"```|\bdef\s+\w+\s*\(|\bprint\s*\(")
+
+
+def _refuse_code_request(genre_label: str) -> dict[str, Any]:
+    """确定性拒绝：不调模型，也不生成任何代码"""
+    answer = (
+        f"不能在正文里插入代码。\n\n"
+        f"原因：当前文档是{genre_label}，插入代码会破坏文体；"
+        f"而且代码是否正确需要运行才知道，我无法替你验证，写进正文风险太大。\n\n"
+        f"如果你的真实需求是下面几种，告诉我其中一种，我按对应方式处理：\n"
+        f"· 想让这段文字表达更清楚 → 我用「改写」帮你重写这段\n"
+        f"· 想记录一段示例代码 → 单独新建一个代码文件（.md / .txt）粘进去，不要混进正文\n"
+        f"· 想统计/核对数据 → 我用文档工具直接算，不需要写代码"
+    )
+    return {
+        "answer": answer,
+        "steps": [
+            {"phase": "think", "detail": "识别到「往正文插入代码」的请求"},
+            {"phase": "guard", "detail": "拒绝：文体不符且无法验证代码正确性"},
+        ],
+        "refs": [],
+        "refused": True,
+    }
+
+
 def run_agent(html: str, query: str, model: str | None = None, prev: dict[str, Any] | None = None) -> dict[str, Any]:
     """
     跑一轮 agent。
@@ -898,6 +929,25 @@ def run_agent(html: str, query: str, model: str | None = None, prev: dict[str, A
     prev：上一轮的会话摘要（T7），用于指代消解；为空时行为与改造前一致。
     """
     effective_query = resolve_reference(query, prev)
+
+    # ① 请求往正文加代码：直接拒绝，不调模型、不产出代码
+    if _CODE_REQUEST_RE.search(effective_query or ""):
+        from .classify_genre import GENRE_LABEL, classify
+
+        plain = strip_tags(html)
+        genre = (classify(plain).get("genre") if plain else None) or "gongwen"
+        refused = _refuse_code_request(GENRE_LABEL.get(genre, "文档"))
+        return {
+            "ok": True,
+            "answer": refused["answer"],
+            "steps": refused["steps"],
+            "refs": [],
+            "toolsUsed": [],
+            "queryUsed": effective_query,
+            "refused": True,
+            "mock": True,
+        }
+
     init: AgentState = {"html": html, "query": effective_query, "model": model, "steps": []}
     out: AgentState = GRAPH.invoke(init)
 
@@ -908,6 +958,16 @@ def run_agent(html: str, query: str, model: str | None = None, prev: dict[str, A
             idx = h.get("block", h.get("blockIndex"))
             if isinstance(idx, int) and idx >= 0:
                 refs.append({"para": idx, "snippet": str(h.get("snippet", ""))[:80], "from": o.get("tool", "")})
+
+    # ② 显示修正：模型偶尔把换行写成字面量 \\n，前端会显示成一串反斜杠
+    if out.get("answer"):
+        out["answer"] = str(out["answer"]).replace("\\n", "\n")
+        # 回答里仍然冒出代码块时，补一句提醒（不删内容，让用户知道不能直接采用）
+        if _CODE_BLOCK_RE.search(out["answer"]):
+            out["answer"] = (
+                "注意：下面这段是代码，不要直接粘进正文（与文体不符，且需要自行验证）。\n\n"
+                + out["answer"]
+            )
 
     # 答案里已经用【第 N 段】标了位置（T4 的上下文标记）：反推成 refs，
     # 这样即使模型选了不含 hits 的工具（如 diagnose_report），前端也能定位。

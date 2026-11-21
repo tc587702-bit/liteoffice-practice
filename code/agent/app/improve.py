@@ -453,6 +453,47 @@ def _looks_official(text: str) -> bool:
     return len(OFFICIAL_MARKERS.findall(text or "")) >= 2
 
 
+
+def _attach_spans(issues: list[dict[str, Any]], html: str) -> None:
+    """
+    给每条问题算 block 内的精确位置 span={start,len}，供前端只高亮错处。
+
+    定位优先级：
+      ① problem 里的「…」就是错的那个词/字（的、脸旁、路上面、开心开心）
+      ② 用 excerpt 前 10 字在段内找到窗口，再在窗口里找该词
+      ③ 都找不到就不给 span，前端退回整段标记
+    """
+    blocks = split_blocks(html)
+    texts = [b.text for b in blocks]
+
+    for it in issues:
+        if it.get("span") is not None:
+            continue
+        idx = it.get("block")
+        if not isinstance(idx, int) or idx < 0 or idx >= len(texts):
+            it["span"] = None
+            continue
+
+        text = texts[idx]
+        tokens = re.findall(r"「([^」]{1,12})」", it.get("problem", ""))
+        excerpt = (it.get("excerpt") or "").strip()
+        window = text.find(excerpt[:10]) if len(excerpt) >= 6 else -1
+
+        span = None
+        for tok in tokens:
+            if not tok or len(tok) > 12:
+                continue
+            # 先在 excerpt 窗口里找，避免抓到段里第一个同字
+            start = text.find(tok, window) if window >= 0 else -1
+            if start < 0:
+                start = text.find(tok)
+            if start >= 0:
+                span = {"start": start, "len": len(tok)}
+                break
+
+        it["span"] = span
+
+
 def _attach_blocks(issues: list[dict], html: str, plain: str) -> None:
     """
     给语病问题补 block（跳转目标）。
@@ -605,6 +646,7 @@ def analyze(html: str, genre: str | None = None, use_model: bool = False) -> dic
         g_rep = grammar.analyze(plain, use_model=use_model)
         issues = g_rep["issues"]
         _attach_blocks(issues, html, plain)
+        _attach_spans(issues, html)
         _add_anchors(issues, html, plain)
         # 语病之外再查可读性：长段落/长句与文体无关
         # 记叙文专属一致性检查（时间线）
@@ -622,13 +664,39 @@ def analyze(html: str, genre: str | None = None, use_model: bool = False) -> dic
                 "problems": [p["problem"] for p in prose],
             }
             issues = issues + prose
-        clean_msg = "没有发现语病，用词与句式都通顺。"
+        # 没开模型时只能说"语言规范层面"没问题：
+        # 「水往山顶流」「白猫叫小黑」这类常识错误规则查不出，
+        # 直接说"没有问题"会误导用户。
+        clean_msg = (
+            "没有发现问题（含事实与常识核查）。"
+            if use_model
+            else "语言规范层面没有发现问题（事实与常识未核查，需要模型）"
+        )
         genre_label = GENRE_LABEL.get(genre, genre or "")
 
     # ---- 反馈记忆：用户否过的建议不再报 ----
     from . import feedback as FB
 
-    # 语病模块（grammar）的 issue 没有 rule 字段，这里统一补：
+        # 给「一定能改对」的问题附上改后文本，前端据此提供「一键修改」：
+    # 用规则层 fix_text 处理 excerpt（片段窗口），只改动错字/的得地等，
+    # 替换时整段窗口换回，周围文字不受影响。
+    fix_failed: list[str] = []
+    for _it in issues:
+        if _it.get("fix"):
+            continue
+        excerpt = (_it.get("excerpt") or "").strip()
+        if not excerpt or len(excerpt) < 4:
+            continue
+        try:
+            fixed, notes = grammar.fix_text(excerpt)
+        except Exception:  # noqa: BLE001 规则层异常不应影响检查结果
+            fix_failed.append(excerpt[:12])
+            continue
+        if notes and fixed != excerpt:
+            _it["fix"] = fixed
+            _it["fixFrom"] = excerpt
+
+# 语病模块（grammar）的 issue 没有 rule 字段，这里统一补：
     # rule = 问题标题，ruleId = 去掉引号内容与数字后的稳定标识
     for _it in issues:
         _it.setdefault("rule", _it.get("problem", ""))

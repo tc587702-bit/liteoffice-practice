@@ -15,12 +15,16 @@ import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist'
  */
 let pdfjsLoader: Promise<typeof import('pdfjs-dist')> | null = null
 
+// pdf.js 的 worker 不能指向 .mjs 文件：
+// 静态服务器（python http.server / 部分 nginx 配置）给 .mjs 的 MIME 不是
+// text/javascript，浏览器会拒绝加载 module worker，表现为「PDF 打不开」。
+// 用 Vite 的 ?worker 语法让打包器把 worker 编译成普通 .js 资源并自动配好地址，
+// 这样与服务器配置无关，也保持同源、不走 CDN。
+import PdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?worker'
+
 function getPdfjs(): Promise<typeof import('pdfjs-dist')> {
   pdfjsLoader ??= import('pdfjs-dist').then((mod) => {
-    mod.GlobalWorkerOptions.workerSrc = new URL(
-      'pdfjs-dist/build/pdf.worker.min.mjs',
-      import.meta.url,
-    ).toString()
+    mod.GlobalWorkerOptions.workerPort = new PdfWorker()
     return mod
   })
   return pdfjsLoader
