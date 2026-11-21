@@ -44,8 +44,20 @@ _load_error = ""
 
 
 def available() -> bool:
-    """模型文件是否就绪（不加载模型，只查目录）"""
-    return (MODEL_DIR / "config.json").exists()
+    """
+    本地深度分析是否真的可用：模型文件 + 依赖 + 推理后端。
+
+    只查目录是不够的：服务器上通常没有 2.9 GB 模型，也没装 torch，
+    此时仍返回 True 会让状态接口谎报"就绪"，调用时才炸。
+    """
+    if not (MODEL_DIR / "config.json").exists():
+        return False
+    try:
+        import torch  # noqa: F401
+        import transformers  # noqa: F401
+    except Exception:  # noqa: BLE001 缺依赖就是不可用，不是错误
+        return False
+    return True
 
 
 def _load():

@@ -1,0 +1,10 @@
+# 可选：本地深度分析（离线、不联网）
+# 只有需要「没有云端 Key 也能分析」时才装；服务器上装了会多占 ~2.5 GB 磁盘 + ~2 GB 内存
+#
+# 安装（CPU 版，别装 CUDA 版）：
+#   pip install -r requirements-local-model.txt --extra-index-url https://download.pytorch.org/whl/cpu
+# 还需要把模型放到 data/models/qwen2.5-1.5b-instruct/（约 2.9 GB）
+# 下载脚本：python tools/fetch_local_model.py
+
+torch>=2.2
+transformers>=4.40
