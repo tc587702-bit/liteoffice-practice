@@ -4,6 +4,19 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>LiteOffice · 共享文档</title>
+<!--
+  协作库走本机 /vendor/*（服务端白名单托管 node_modules 里的 yjs 与 lib0）。
+  不用 CDN：局域网协作常在无外网环境下进行，依赖外部站点会让页面直接打不开。
+  lib0 内部用相对路径互引，浏览器可自行解析，这里只需映射裸名前缀。
+-->
+<script type="importmap">
+{
+  "imports": {
+    "yjs": "/vendor/yjs/dist/yjs.mjs",
+    "lib0/": "/vendor/lib0/"
+  }
+}
+</script>
 <style>
   :root{
     --ink:#000; --card:#303032; --sec:#3A3A3C; --accent:#0A84FF;
@@ -124,9 +137,10 @@ async function main() {
  * 多人编辑先保证「不丢字、不冲突」，格式保真留到接 Vue 编辑器时再做。
  */
 async function startCollab(token, docMeta, docEl, role) {
-  const Y = await import('https://esm.sh/yjs@13.6.20')
-  const encoding = await import('https://esm.sh/lib0@0.2.99/encoding')
-  const decoding = await import('https://esm.sh/lib0@0.2.99/decoding')
+  // 本地加载（见 <head> 的 importmap）：局域网常无外网，不能依赖 CDN
+  const Y = await import('yjs')
+  const encoding = await import('lib0/encoding')
+  const decoding = await import('lib0/decoding')
 
   const ydoc = new Y.Doc()
   const ytext = ydoc.getText('body')

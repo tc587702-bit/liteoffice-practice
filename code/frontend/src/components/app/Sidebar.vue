@@ -35,7 +35,7 @@ const countLabel = computed(() => String(docs.value.length).padStart(2, '0'))
 
 <template>
   <aside
-    class="lo-glass flex w-[264px] shrink-0 flex-col border-r border-white/[0.06] px-4 pb-6 pt-6"
+    class="lo-glass lo-glass-strong flex w-[264px] shrink-0 flex-col border-r border-white/[0.06] px-4 pb-6 pt-6"
   >
     <nav class="flex flex-col justify-center gap-1">
       <RouterLink

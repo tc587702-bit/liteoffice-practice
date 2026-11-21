@@ -18,10 +18,11 @@ import os
 import re
 from typing import Any
 
-from . import embed, kb
+from . import embed, grammar, kb
 from .classify_genre import GENRE_LABEL, classify
 from .llm import DEFAULT_MODEL, complete, has_credentials
 from .query_expand import search_expanded
+from .tools import strip_tags
 
 MAX_EVIDENCE_CHARS = 1200
 
@@ -348,6 +349,122 @@ def qa(
     return {"ok": True, "answer": answer, "citations": citations, "steps": steps, "mock": res.mock}
 
 
+
+# ---------------------------------------------------------------- 续写
+
+def genre_label(g: str) -> str:
+    return GENRE_LABEL.get(g, g)
+
+
+_CONT_CODE = re.compile(r"```|\bdef\s+\w+\s*\(|\bprint\s*\(|\bfunction\s*\w*\s*\(|<script", re.IGNORECASE)
+_CONT_MARKUP = re.compile(r"(?m)^\s{0,3}(#{1,6}\s|[-*+]\s|\|.+\||\d+\.\s)")
+
+
+def continue_text(
+    html: str,
+    genre: str | None = None,
+    instruction: str = "",
+    model: str | None = None,
+    max_chars: int = 1200,
+    cursor_context: str = "",
+) -> dict[str, Any]:
+    """
+    续写：接着正文末尾写一段，保持同一文体与叙述口吻。
+
+    与 rewrite 的区别：续写必然新增内容，所以不校验"不得增删事实"，
+    只校验"不是代码/标记、长度合理、不是 Markdown 结构"。
+    """
+    plain = strip_tags(html)
+    if len(plain.strip()) < 20:
+        return {"ok": False, "reason": "文档太短，无法判断文风", "continuation": ""}
+
+    g = genre if genre and genre in GENRE_LABEL else (classify(plain).get("genre") or "gongwen")
+    if not has_credentials(model or DEFAULT_MODEL):
+        return {"ok": False, "reason": "续写需要模型凭据（未配置 Key）", "continuation": "", "mock": True}
+
+    # 续写必须接着"光标所在位置"的前文，而不是文末：
+    # 用文末内容生成、再插到中间，句子之间接不上。
+    cursor_ctx = (cursor_context or "").strip()
+    if len(cursor_ctx) >= 20:
+        tail = cursor_ctx[-600:]
+        context_used = "cursor"
+    else:
+        tail = plain.strip()[-600:]
+        context_used = "tail"
+    style = CHECKLIST.get(g, [])
+    # 锚句：上下文里的最后一句。续写必须从这一句往下接，否则读者会觉得"跳了"
+    anchor = ""
+    for seg in re.split(r"(?<=[。！？…])", tail):
+        if seg.strip():
+            anchor = seg.strip()
+    prompt = (
+        f"下面是{genre_label(g)}已经写到的部分。请**紧接着最后一句**往下写。\n"
+        f"硬性要求：\n"
+        f"1. 必须承接最后一句「{anchor[-60:]}」的动作/场景/时间，读者读起来要连贯\n"
+        f"2. 不要更换场景、地点、时间，不要回头重述已经发生过的事\n"
+        f"3. 保持同一人称与叙述视角，不要突然跳视角\n"
+        f"4. 只输出续写的正文：不要解释、不要标题、不要 Markdown 符号、不要复述原文\n"
+        f"5. 控制在 150–400 字\n"
+        + (f"6. 文体要点：{'；'.join(style[:3])}\n" if style else "")
+        + (f"7. 用户额外要求：{instruction[:80]}\n" if instruction.strip() else "")
+        + f"\n已经写到：\n{tail}\n\n紧接着「{anchor[-60:]}」继续写："
+    )
+    res = complete([{"role": "user", "content": prompt}], model=model, max_tokens=1200)
+    text = (res.text or "").strip()
+
+    # ---- 护栏 ----
+    if not res.ok or not text:
+        return {"ok": False, "reason": f"模型未返回内容（{res.error or '空'}）", "continuation": "", "mock": res.mock}
+    if _CONT_CODE.search(text):
+        return {"ok": False, "reason": "模型返回了代码，已拒绝", "continuation": "", "mock": res.mock, "blocked": "code"}
+    if _CONT_MARKUP.search(text):
+        return {
+            "ok": False,
+            "reason": "模型返回了 Markdown 结构（标题/列表/表格），正文里不合适",
+            "continuation": "",
+            "mock": res.mock,
+            "blocked": "markup",
+        }
+    body = text.lstrip("#*- \n")
+    if len(body) < 30:
+        return {"ok": False, "reason": f"续写太短（{len(body)} 字），可能被截断", "continuation": "", "mock": res.mock}
+    body = body[:max_chars]
+    # 不许重复原文最后一句
+    last_line = tail.split("。")[-2] if "。" in tail else ""
+    if last_line and body.startswith(last_line.strip()[:12]):
+        body = body[len(last_line.strip()[:12]) :].lstrip("，。 ")
+
+    # ---- 衔接自检（只提示，不拦）----
+    # 依据：续写开头若与锚句没有任何共同汉字（2-gram），多半是"跳到另一个场景"
+    def _grams_of(t: str) -> set[str]:
+        flat = re.sub(r"[^\u4e00-\u9fa5]", "", t or "")
+        return {flat[i : i + 2] for i in range(len(flat) - 1)}
+
+    anchor_grams = _grams_of(anchor)
+    head_grams = _grams_of(body[:80])
+    linked = bool(anchor_grams & head_grams) if anchor_grams else True
+    needs_review = not linked
+
+    return {
+        "ok": True,
+        "continuation": body,
+        "anchor": anchor[-60:],
+        "linked": linked,
+        "needsReview": needs_review,
+        "genre": g,
+        "genreLabel": genre_label(g),
+        "chars": len(body),
+        "contextUsed": context_used,
+        "mock": res.mock,
+        "steps": [
+            {
+                "phase": "continue",
+                "detail": f"续写 {len(body)} 字（{res.model}，依据：{'光标前文' if context_used == 'cursor' else '文末'}）",
+            }
+        ],
+    }
+
+
 def _apply_terms(text: str, terms: list[dict]) -> tuple[str, list[dict]]:
     """按术语表做替换，返回新文本与改动清单"""
     out = text
@@ -417,6 +534,97 @@ def _resolve_kb(kb_id: str, genre: str, inferred: bool) -> str:
     return kb_id
 
 
+
+# ---------------------------------------------------------------- 按事实改正
+
+_CORRECT_CODE = re.compile(r"```|\bdef\s+\w+\s*\(|\bprint\s*\(|<script", re.IGNORECASE)
+
+
+def _correct_by_fact(
+    selection: str,
+    problem: str,
+    genre: str,
+    model: str | None,
+    steps: list[dict[str, str]],
+) -> dict[str, Any]:
+    """
+    按事实/概念错误改正一句话。
+
+    与另外两个模式的区别：
+      normalize  只改语病，一个字都不许多
+      polish     写得好看，但绝不许改事实
+      correct    就是来改事实的（荷花冬天开 → 夏天开）
+    护栏只守「别胡来」：不能是代码、不能变成另一段、必须真的改了。
+    """
+    if not has_credentials(model or DEFAULT_MODEL):
+        return {
+            "ok": False,
+            "candidate": "",
+            "reason": "按事实改需要模型凭据（未配置 Key）",
+            "steps": steps,
+            "mock": True,
+        }
+
+    prompt = (
+        f"下面这句话有错误：{problem[:120]}\n"
+        f"请只输出改正后的这一句。要求：\n"
+        f"1. 保持原句的句式、人称、长度，只改错的那处\n"
+        f"2. 不要解释、不要加引号、不要写「改为…」\n"
+        f"3. 不确定正确说法时，就保留原句不动\n"
+        f"4. 文体是「{GENRE_LABEL.get(genre, genre)}」，不要写成说明文口吻\n"
+        f"\n原句：\n{selection}\n"
+    )
+    res = complete([{"role": "user", "content": prompt}], model=model, max_tokens=600)
+    steps.append({"phase": "correct", "detail": f"按事实改正（{res.model}）"})
+    text = (res.text or "").strip().strip('"“”')
+
+    if not res.ok or not text:
+        return {
+            "ok": False,
+            "candidate": "",
+            "reason": f"模型未返回内容（{res.error or '空'}）",
+            "steps": steps,
+            "mock": res.mock,
+        }
+    if _CORRECT_CODE.search(text):
+        return {
+            "ok": False,
+            "candidate": "",
+            "reason": "模型返回了代码，已拒绝",
+            "steps": steps,
+            "mock": res.mock,
+            "blocked": "code",
+        }
+    ratio = len(text) / max(1, len(selection))
+    if not (0.5 <= ratio <= 2.0):
+        return {
+            "ok": False,
+            "candidate": "",
+            "reason": f"改动幅度异常（{len(selection)} 字 → {len(text)} 字），可能是另写了一段",
+            "steps": steps,
+            "mock": res.mock,
+            "blocked": "length",
+        }
+    if text.strip() == selection.strip():
+        return {
+            "ok": True,
+            "noChange": True,
+            "candidate": "",
+            "reason": "模型没有改动这句（可能它认为原句没错）",
+            "steps": steps,
+            "mock": res.mock,
+        }
+    return {
+        "ok": True,
+        "candidate": text,
+        "changes": [f"按事实改正：{problem[:30]}"],
+        "genre": genre,
+        "genreLabel": GENRE_LABEL.get(genre, genre),
+        "steps": steps,
+        "mock": res.mock,
+    }
+
+
 def rewrite(
     kb_id: str,
     selection: str,
@@ -424,11 +632,37 @@ def rewrite(
     model: str | None = None,
     top_k: int = 3,
     context: str = "",
+    allow_model_polish: bool = False,
+    mode: str = "normalize",
 ) -> dict[str, Any]:
+    """
+    mode 决定用哪套标准，两套不能混用：
+
+      normalize  规范修正：别写错（的得地/错别字/赘余）。一个字都不许多，
+                 走 rewrite_guard 四道护栏，幅度 ≤20%。结果确定、可一键替换。
+      polish     更优美：写得好看（意象/句式/节奏）。必须允许加修饰，
+                 走 polish_guard —— 只守事实底线（数字/名称/新事件），放开幅度。
+
+    为什么必须分开：实测「我坐在长椅上看着风景，心里十分开心。」润色成
+    「我靠着长椅，看风把树影摇成细碎的斑…」是好改写，但规范护栏判「幅度 78%」拦掉。
+    用一套标准管两件事，紧了不可能优美，松了就会改坏原文。
+
+    allow_model_polish：是否允许记叙文/说明文/议论文走模型。
+    默认 False —— 护栏有盲区，不把风险默认摊给所有用户。调用方显式要求时才放开。
+    mode="polish" 视为显式要求润色，自动放开该限制。
+    """
+    polish_mode = mode == "polish"
+    if polish_mode:
+        allow_model_polish = True
     steps: list[dict[str, str]] = []
     selection = (selection or "").strip()
     if len(selection) < 10:
         return {"ok": False, "candidate": "", "reason": "选中内容太短（至少 10 字）", "steps": steps}
+
+    # 按事实改正：这条路径允许改事实（与 polish 相反），所以单独分派，不进通用流程
+    if mode == "correct":
+        g_c = genre if genre and genre in GENRE_LABEL else (classify(selection).get("genre") or "gongwen")
+        return _correct_by_fact(selection, context, g_c, model, steps)
 
     # ① 文体：用户指定优先，否则自动判定
     #    inferred 标记「这个文体是不是可信的判定结果」——
@@ -446,6 +680,12 @@ def rewrite(
         inferred = bool(detected)
     steps.append({"phase": "genre", "detail": f"文体：{GENRE_LABEL.get(g, g)}（置信度 {g_conf:.2f}，{g_reason}）"})
 
+    # ①-c 先跑确定性的语言规范修正：这是"一定能改对"的那部分，
+    #     改完若没有任何实质改动，就直接告诉用户没问题，不要硬造一版"改写"。
+    fixed, fix_notes = grammar.fix_text(selection)
+    if fix_notes:
+        steps.append({"phase": "fix", "detail": "规则修正：" + "；".join(fix_notes[:3])})
+
     # ①-b 按文体选库（仅在文体可信时；前端不传 genre 且能判出文体才切）
     resolved = _resolve_kb(kb_id, g, inferred)
     if resolved != kb_id:
@@ -462,14 +702,37 @@ def rewrite(
         }
     )
 
-    # ③ 规则改写：术语替换（不依赖模型）
-    candidate, changes = _apply_terms(selection, terms)
+    # ③ 规则改写：先做语言规范修正（的/得/地、错别字、赘余、重复），再做术语替换
+    candidate, changes = _apply_terms(fixed, terms)
+    changes = list(fix_notes) + list(changes)
     checklist = CHECKLIST.get(g, [])
 
     # ④ 无模型：返回规则建议，明确标注
-    real_model = has_credentials(model or DEFAULT_MODEL)
+    # 记叙文/说明文：只做语言规范修正（的得地、错别字、赘余、重复）。
+    # 这类文体"润色"是主观的，模型改写容易把原意改掉（实测把"昨天下完雨后"
+    # 改成"昨天雨后"，还擅自加了"车轮一打滑"），所以不走模型。
+    narrative_only = g in ("essay_narr", "expository", "essay_arg")
+    # 默认：非记叙类才走模型；调用方显式要求润色时，记叙类也走（但仍受护栏约束）
+    real_model = has_credentials(model or DEFAULT_MODEL) and (not narrative_only or allow_model_polish)
     if not real_model:
-        steps.append({"phase": "rewrite", "detail": "无模型 Key，只做术语层面的规则建议"})
+        # 规则层没有任何改动 → 直接说"没问题"，而不是把原文再抛回去一次
+        if candidate.strip() == selection.strip():
+            steps.append({"phase": "rewrite", "detail": "规则检查未发现需要修改的地方"})
+            return {
+                "ok": True,
+                "noChange": True,
+                "candidate": "",
+                "reason": "这段没有发现需要修改的地方",
+                "changes": [],
+                "genre": g,
+                "genreLabel": GENRE_LABEL.get(g, g),
+                "genreConfidence": round(g_conf, 3),
+                "checklist": checklist,
+                "evidence": {"terms": terms, "chunks": _citations(chunks)},
+                "steps": steps,
+                "mock": True,
+            }
+        steps.append({"phase": "rewrite", "detail": f"按语言规范改了 {len(changes)} 处"})
         return {
             "ok": True,
             "genre": g,
@@ -486,26 +749,151 @@ def rewrite(
     # ⑤ 有模型：术语约束 + 规范 + 文体要求一起进 prompt
     material = "\n\n".join(f"[{i}] 《{c['docName']}》\n{_clip(c['text'], 500)}" for i, c in enumerate(chunks, 1))
     term_line = "；".join(f"{t['from']}→{t['to']}" for t in terms) or "（无）"
-    prompt = (
-        f"你是一位中文写作审校。按「{GENRE_LABEL.get(g, g)}」的要求改写下面的段落。\n"
-        f"硬性要求：\n1. 必须使用这些术语：{term_line}\n"
-        f"2. 只用材料里的规范，不要编造：\n{material}\n"
-        f"3. 保持原意与事实（数字、单位、时间不得改动）\n"
-        f"4. 只输出改写后的正文，不要解释\n"
-        + (f"\n上下文（仅供理解，不要改写）：\n{context[:400]}\n" if context.strip() else "")
-        + f"\n原文：\n{selection}\n"
-    )
+    if polish_mode:
+        # 润色：目标是「写得好看」，必须明确允许加修饰，否则模型会按规范修正的
+        # 口径一个字都不敢动，产出与原文几乎相同 —— 那这个按钮就名不副实。
+        prompt = (
+            f"你是一位擅长中文散文的编辑。把下面这段「{GENRE_LABEL.get(g, g)}」改写得更优美。\n"
+            "可以做：调整句式与语序、替换更贴切的形容词、加入比喻与感官细节、改善节奏。\n"
+            "绝对不能做：\n"
+            "1. 不得新增或改动任何数字、日期、时间、人名、地名、引号内内容\n"
+            "2. 不得新增原文没有的事件或动作（例如原文没摔倒，就不能写摔倒）\n"
+            "3. 不得新增原文没有的人物、地点、机构\n"
+            "4. 不得改变原意与事实，不得删掉原文交代的信息\n"
+            "只输出改写后的正文，不要解释，不要加标题。\n"
+            + (f"\n上下文（仅供理解，不要改写）：\n{context[:400]}\n" if context.strip() else "")
+            + f"\n原文：\n{fixed}\n"
+        )
+    else:
+        prompt = (
+            f"你是一位中文写作审校。按「{GENRE_LABEL.get(g, g)}」的要求改写下面的段落。\n"
+            f"硬性要求：\n1. 必须使用这些术语：{term_line}\n"
+            f"2. 只用材料里的规范，不要编造：\n{material}\n"
+            f"3. 只改语言表达，不得增删事实与情节；数字、单位、时间、人名、地名、引号内内容一律不得改动\n"
+            f"4. 只输出改写后的正文，不要解释\n"
+            + (f"\n上下文（仅供理解，不要改写）：\n{context[:400]}\n" if context.strip() else "")
+            + f"\n原文：\n{selection}\n"
+        )
     res = complete([{"role": "user", "content": prompt}], model=model, max_tokens=2500)
     steps.append({"phase": "rewrite", "detail": f"模型改写（{res.model}）"})
+
+    # 模型调用失败/返回空：退回规则版，如实说明，不把占位文本当结果
+    if not res.ok or not (res.text or "").strip():
+        steps.append({"phase": "guard", "detail": f"模型未成功（{res.error or '空返回'}），改用规范修正版"})
+        rule_candidate = candidate
+        if rule_candidate.strip() == selection.strip():
+            return {
+                "ok": True,
+                "noChange": True,
+                "candidate": "",
+                "reason": "模型调用失败，且规则检查也没有发现需要修改的地方",
+                "changes": [],
+                "genre": g,
+                "genreLabel": GENRE_LABEL.get(g, g),
+                "checklist": checklist,
+                "evidence": {"terms": terms, "chunks": _citations(chunks)},
+                "steps": steps,
+                "mock": True,
+            }
+        return {
+            "ok": True,
+            "genre": g,
+            "genreLabel": GENRE_LABEL.get(g, g),
+            "genreConfidence": round(g_conf, 3),
+            "candidate": rule_candidate,
+            "changes": changes,
+            "checklist": checklist,
+            "evidence": {"terms": terms, "chunks": _citations(chunks)},
+            "steps": steps,
+            "mock": True,
+            "modelFailed": True,
+        }
+
+    # 护栏按模式分派：基线一律用规则修正后的文本（不是原文）——
+    # 规则层会合法删字（「涉及到」→「涉及」），拿原文当基线会把它误判成内容丢失。
+    raw_model_text = res.text.strip()
+    if polish_mode:
+        from . import polish_guard
+
+        sim = polish_guard.similarity(fixed, raw_model_text)
+        verdict = polish_guard.check(fixed, raw_model_text, similarity=sim)
+        guard_name = "润色护栏"
+        if verdict.get("notes"):
+            steps.append({"phase": "guard", "detail": "；".join(verdict["notes"])})
+    else:
+        from . import rewrite_guard
+
+        verdict = rewrite_guard.check(fixed, raw_model_text)
+        guard_name = "规范护栏"
+    # 润色被拦下时再试一次保守版：只允许调整语序与替换同义词，
+    # 不许新增任何词语 —— 多数"模型发挥过头"的情况能被这一次救回来。
+    if not verdict["ok"] and polish_mode:
+        retry_prompt = (
+            "把下面这段文字改得更通顺，但严格限制：\n"
+            "1. 不得新增任何原文没有的词语（可以替换同义词、调整语序、断句）\n"
+            "2. 不得删掉原文任何信息\n"
+            "3. 不得新增或改动数字、时间、人名、地名、引号内容\n"
+            "只输出改写后的正文。\n\n原文：\n" + fixed
+        )
+        res2 = complete([{"role": "user", "content": retry_prompt}], model=model, max_tokens=1200)
+        if res2.ok and (res2.text or "").strip():
+            retry_text = res2.text.strip()
+            sim2 = polish_guard.similarity(fixed, retry_text)
+            verdict2 = polish_guard.check(fixed, retry_text, similarity=sim2)
+            if verdict2["ok"]:
+                steps.append({"phase": "guard", "detail": "保守重试通过润色护栏"})
+                raw_model_text = retry_text
+                verdict = verdict2
+            else:
+                steps.append({"phase": "guard", "detail": "保守重试仍未通过"})
+
+    if not verdict["ok"]:
+        reasons = "；".join(b["detail"] for b in verdict["blocked"][:3])
+        steps.append({"phase": "guard", "detail": f"模型结果被{guard_name}拦下 —— {reasons}"})
+        rule_candidate = candidate
+        guard_info = {"blocked": verdict["blocked"]}
+        # 规则层也没改动：没有"规则版"可退，文案不能谎称已退回
+        if rule_candidate.strip() == selection.strip():
+            return {
+                "ok": True,
+                "noChange": True,
+                "candidate": "",
+                "reason": f"模型改写未通过{guard_name}（{reasons}），且规则检查没有发现需要修改的地方",
+                "changes": [],
+                "genre": g,
+                "genreLabel": GENRE_LABEL.get(g, g),
+                "checklist": checklist,
+                "evidence": {"terms": terms, "chunks": _citations(chunks)},
+                "steps": steps,
+                "mock": res.mock,
+                "guard": guard_info,
+            }
+        return {
+            "ok": True,
+            "genre": g,
+            "genreLabel": GENRE_LABEL.get(g, g),
+            "genreConfidence": round(g_conf, 3),
+            "candidate": rule_candidate,
+            "changes": changes,
+            "checklist": checklist,
+            "evidence": {"terms": terms, "chunks": _citations(chunks)},
+            "steps": steps,
+            "mock": res.mock,
+            "guard": guard_info,
+            "guardMessage": f"模型改写未通过{guard_name}，已改用规范修正版（{reasons}）",
+        }
+
+    steps.append({"phase": "guard", "detail": f"模型结果通过{guard_name}"})
     return {
         "ok": True,
         "genre": g,
         "genreLabel": GENRE_LABEL.get(g, g),
         "genreConfidence": round(g_conf, 3),
-        "candidate": res.text.strip() or candidate,
+        "candidate": raw_model_text,
         "changes": changes,
         "checklist": checklist,
         "evidence": {"terms": terms, "chunks": _citations(chunks)},
         "steps": steps,
         "mock": res.mock,
+        "mode": "polish" if polish_mode else "normalize",
     }

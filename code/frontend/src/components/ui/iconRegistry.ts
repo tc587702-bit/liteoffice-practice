@@ -53,6 +53,9 @@ export const ICONS = {
     '<path d="M16 3a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2 1 1 0 0 1 1 1v1a2 2 0 0 1-2 2 1 1 0 0 0-1 1v2a1 1 0 0 0 1 1 6 6 0 0 0 6-6V5a2 2 0 0 0-2-2z"/><path d="M5 3a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2 1 1 0 0 1 1 1v1a2 2 0 0 1-2 2 1 1 0 0 0-1 1v2a1 1 0 0 0 1 1 6 6 0 0 0 6-6V5a2 2 0 0 0-2-2z"/>',
   'file-warning':
     '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
+  'align-left': '<path d="M21 6H3"/><path d="M15 12H3"/><path d="M17 18H3"/>',
+  'align-center': '<path d="M21 6H3"/><path d="M17 12H7"/><path d="M19 18H5"/>',
+  'align-right': '<path d="M21 6H3"/><path d="M21 12H9"/><path d="M21 18H7"/>',
 } as const
 
 export type IconName = keyof typeof ICONS

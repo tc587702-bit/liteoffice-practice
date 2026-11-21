@@ -1,9 +1,10 @@
 import { computed, ref, shallowRef } from 'vue'
 import { defineStore } from 'pinia'
 import { deleteDoc, loadAll, saveDoc, saveSession, type DocRecord } from '../lib/db'
-import { decodeText, detectKind, formatSize, parsePptx, type FileKind } from '../lib/file'
+import { decodeText, detectKind, formatSize, type FileKind } from '../lib/file'
+import { parsePptxRich } from '../lib/pptxLayout'
 import { parseDocx } from '../lib/docx'
-import { escapeHtml, htmlToMarkdown } from '../lib/markdown'
+import { escapeHtml } from '../lib/markdown'
 import {
   inspectXlsxWorkbook,
   parseXlsxFallback,
@@ -137,7 +138,6 @@ async function buildRecord(
       case 'md': {
         const decoded = decodeText(buffer)
         record.markdown = decoded.text
-        record.originalMarkdown = decoded.text
         record.text = decoded.text
         record.encoding = decoded.encoding
         if (decoded.encoding === 'gb18030') notices.push('检测到 GBK/GB18030 编码，已按兼容编码解码')
@@ -178,11 +178,15 @@ async function buildRecord(
         break
       }
       case 'pptx': {
-        onPhase('正在读取幻灯片')
-        const parsed = await parsePptx(buffer)
+        onPhase('正在解析版式与图片')
+        // 版式解析：背景 + 形状坐标 + 字号颜色 + 表格图片，尽量还原 PowerPoint 的排版
+        const parsed = await parsePptxRich(buffer)
         record.slides = parsed.slides
+        record.slidesAspect = parsed.aspect
+        // 字号换算依赖真实页宽，缺了它 16:9 的稿子字号会被整体放大三分之一
+        record.slidesWidthPt = parsed.widthPt
         record.warnings = parsed.warnings
-        const text = parsed.slides.map((slide) => `${slide.title}\n${slide.lines.join('\n')}`).join('\n\n')
+        const text = parsed.slides.map((s) => s.text).join('\n\n')
         record.html = textToHtml(text)
         record.originalHtml = record.html
         record.text = text
@@ -218,7 +222,6 @@ async function buildRecord(
         const decoded = decodeText(buffer)
         record.kind = 'md'
         record.markdown = decoded.text
-        record.originalMarkdown = decoded.text
         record.text = decoded.text
         record.html = textToHtml(decoded.text)
         record.originalHtml = record.html
@@ -613,15 +616,32 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     updateDoc(id, { sheets, dirty: true })
   }
 
+  /**
+   * 恢复原稿：把正文回滚到导入时的状态。
+   *
+   * 保留一份「恢复前」的快照（resetSnapshot），允许用户点「撤销恢复」退回 ——
+   * 原来是一键清空且不进撤销栈，改了一小时的稿子手滑就没了。
+   */
+  const resetSnapshot = ref<{ id: string; html: string } | null>(null)
+  /** 正文被整体替换（恢复原稿/撤销恢复）时自增，编辑器据此重建分块 */
+  const docRevision = ref(0)
+
   function resetDoc(id: string) {
     const doc = docs.value.find((item) => item.id === id)
     if (!doc) return
-    const patch: Partial<DocRecord> = { html: doc.originalHtml, dirty: false }
-    // md 的源码是唯一真相，重置时一并还原；老记录没有 originalMarkdown 时用初稿 html 反推
-    if (doc.kind === 'md') {
-      patch.markdown = doc.originalMarkdown ?? htmlToMarkdown(doc.originalHtml)
-    }
-    updateDoc(id, patch)
+    resetSnapshot.value = { id, html: doc.html }
+    updateDoc(id, { html: doc.originalHtml, dirty: false })
+    docRevision.value += 1
+  }
+
+  /** 撤销刚才的「恢复原稿」 */
+  function undoReset(): boolean {
+    const snap = resetSnapshot.value
+    if (!snap) return false
+    updateDoc(snap.id, { html: snap.html, dirty: true })
+    resetSnapshot.value = null
+    docRevision.value += 1
+    return true
   }
 
   return {
@@ -645,6 +665,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     updateDoc,
     updateCell,
     resetDoc,
+    docRevision,
+    undoReset,
+    resetSnapshot,
     cancelJob,
     resolveConfirm,
     askConfirm,

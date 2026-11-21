@@ -26,6 +26,7 @@
 """
 from __future__ import annotations
 
+import os
 import re
 from typing import Any
 
@@ -105,7 +106,11 @@ def _is_state_adj_abab(unit: str) -> bool:
 _REPEAT_RE = re.compile(r"([\u4e00-\u9fa5]{1,4})\1")
 
 # 量词 / 名词重叠：一道一道、一片一片、一层一层 —— 中文里表「多而连续」，合法
-_MEASURE_HEADS = "道片层条根颗只群堆排串滴块张页条句份类种"
+_MEASURE_HEADS = (
+    "道片层条根颗只群堆排串滴块张页句份类种"
+    "圈遍趟阵次声步口拳刀针线行段节篇首曲场局盘碗杯瓶袋包捆扎束摞沓"
+    "把支团股缕丝点粒棵株朵枝丫批列组对双套副幅面扇间座栋幢级档款项笔单样位天年月周日季岁"
+)
 # V着V着：晒着晒着、走着走着、看着看着 —— 表「动作持续并产生结果」，合法
 _VZHE_RE = re.compile(r"^([\u4e00-\u9fa5])着\1着$")
 # 惯用的安慰/否定反复：没事没事、不行不行、不对不对 —— 口语语气，不算病
@@ -217,8 +222,99 @@ _DI_ADVS = (
     "轻轻|慢慢|静静|悄悄|缓缓|默默|仔细|认真|高兴|飞快|迅速|急忙|连忙|"
     "重重|狠狠|紧紧|牢牢|渐渐|突然|忽然|立刻|马上|不断|不停|一个劲"
 )
+# 「动词 + 的 + 双字形容词」应为「得」：花开的鲜艳 → 开得鲜艳
+# 只列高频动词，且要求后面跟 2 个汉字再接标点：写的东西（1 字）不会误伤
+_DE_VERB = "开长写做说笑唱跑走干擦洗摆放收弄搞来去回看听吃喝睡站坐"
+# 只有这些双字形容词作补语时才改「得」。
+# 枚举形容词比「排除名词」安全：漏改只是少改一处，改错会破坏原意。
+_ADJ_COMPLEMENT = {
+    "鲜艳", "干净", "清楚", "整齐", "漂亮", "工整", "好听", "好看", "难看",
+    "香甜", "响亮", "滚烫", "冰凉", "雪白", "笔直", "飞快", "高兴", "开心",
+    "认真", "仔细", "熟练", "流利", "顺畅", "合理", "规范", "完整",
+    "歪斜", "通红", "惨白", "清脆", "洪亮", "沉重", "轻松", "舒坦",
+}
+
+# 「的」后面接这些词时是定语（写的东西、看的地方），不能改成「得」
+_AFTER_DE_NOUNS = {
+    "东西", "事情", "问题", "时候", "地方", "样子", "话", "人", "书", "菜",
+    "字", "信", "报告", "材料", "文件", "文章", "内容", "结果", "方法", "意思",
+    "感觉", "心情", "计划", "方案", "房间", "桌子", "衣服", "同学", "老师",
+}
+
+_DE_VERB_ADJ = re.compile(rf"([{_DE_VERB}])的(?=[\u4e00-\u9fa5]{{2}}(?:[，。！？、；）]|$))")
+
 # 「状态副词 + 的 + 动词」应为「地」：风轻轻的吹 → 风轻轻地吹
 _DI_RE = re.compile(rf"({_DI_ADVS})的(?=[{re.escape(_DI_VERBS)}])")
+
+
+
+def fix_text(text: str) -> tuple[str, list[str]]:
+    """
+    把规则层能确定的语病直接改掉，返回 (改后文本, 改动说明)。
+
+    只做"改了不会错"的修改，不做"可能更好"的润色：
+      的→得   动词/形容词 + 程度补语   （笑的很高兴 → 笑得很高兴）
+      的→地   状语 + 动词             （风轻轻的吹 → 风轻轻地吹）
+      错别字  脸旁 → 脸庞
+      赘余    路上面 → 路上、涉及到 → 涉及、凯旋归来 → 凯旋
+    改动幅度小于 2 个字时视为"没有实质修改"，由调用方决定是否提示。
+    """
+    out = text
+    notes: list[str] = []
+
+    # 的 → 得（程度补语）
+    if _DE_SHOULD_BE_DE.search(out):
+        out = _DE_SHOULD_BE_DE.sub("得", out)
+        notes.append("「的」改「得」（程度补语）")
+
+    # 的 → 地（状语）
+    if _DI_RE.search(out):
+        out = _DI_RE.sub(lambda m: m.group(1) + "地", out)
+        notes.append("「的」改「地」（状语）")
+
+    # 的 → 得（动词 + 形容词补语）
+    if _DE_VERB_ADJ.search(out):
+        # 只改「动词+的+形容词」，跳过「动词+的+名词」
+        def _to_de(m):
+            after2 = out[m.start() + 2 : m.start() + 4]
+            return m.group(1) + "得" if after2 in _ADJ_COMPLEMENT else m.group(0)
+
+        fixed_out = _DE_VERB_ADJ.sub(_to_de, out)
+        if fixed_out != out:
+            out = fixed_out
+            notes.append("「的」改「得」（动补）")
+
+    # 错别字
+    for wrong, right in TYPOS.items():
+        if wrong in out:
+            out = out.replace(wrong, right)
+            notes.append(f"「{wrong}」→「{right}」")
+
+    # 赘余
+    for pat, repl, _why in REDUNDANT:
+        new = re.sub(pat, repl, out)
+        if new != out:
+            out = new
+            notes.append(f"删除赘余（{pat} → {repl}）")
+
+    # 真正重复的词（只处理规则判定为手误的那类）
+    #
+    # 注意：problem 里引号括的是**双写形式**（「开心开心」），
+    # 原来直接拿它当 unit，再拼一次得到「开心开心开心开心」，永远匹配不到，
+    # 结果就是"检查报错、改写不动"。这里把双写形式折半取单元。
+    for item in check_repeat(out):
+        if item["level"] != "warning":
+            continue
+        m = re.search(r"「([^」]+)」", item["problem"])
+        if not m:
+            continue
+        doubled = m.group(1)
+        unit = doubled[: len(doubled) // 2] if len(doubled) % 2 == 0 else doubled
+        if len(unit) >= 2 and unit + unit in out:
+            out = out.replace(unit + unit, unit)
+            notes.append(f"删除重复「{unit}{unit}」")
+
+    return out, notes
 
 
 def check_de(text: str) -> list[dict[str, Any]]:
@@ -236,6 +332,24 @@ def check_de(text: str) -> list[dict[str, Any]]:
                 "动词或形容词后面接「很、非常、十分」这类程度补语时用「得」，不用「的」",
                 f"改成「得{after}」",
                 text[max(0, start - 10): start + 12],
+                pos=start,
+            )
+        )
+
+    for m in _DE_VERB_ADJ.finditer(text):
+        start = m.start()
+        after = text[start + 1 : start + 5]
+        after2 = text[start + 2 : start + 4]
+        if after2 not in _ADJ_COMPLEMENT:
+            continue  # 只有确定的形容词补语才改（写的东西、开的荷花都不动）
+        issues.append(
+            _issue(
+                "warning",
+                f"第 {start + 1} 字",
+                "「的」应为「得」（动词后接形容词）",
+                f"「{m.group(1)}的{after}」是动补结构，补语前用「得」",
+                f"改成「{m.group(1)}得{after}」",
+                text[max(0, start - 8) : start + 10],
                 pos=start,
             )
         )
@@ -474,8 +588,11 @@ _FACT_PROMPT = """你是中文作文批改老师。找出下面这段文字里�
 每条必须给出 quote：从原文【逐字复制】的片段（5–20 字），不能改写、不能加标点。
 无法逐字引用原文的问题不要报。
 
+每条还要给出 rewrite：把 quote 改对之后的句子（必须是成品，能直接替换原文片段；
+不要写「建议改为…」这类话）。如果无法确定正确说法，就省略 rewrite 字段。
+
 只输出 JSON，不要任何解释文字：
-{{"issues":[{{"quote":"原文片段","problem":"问题概述（20字内）","why":"为什么错（40字内）","how":"怎么改（40字内）","kind":"常识错误|前后矛盾|概念混淆"}}]}}
+{{"issues":[{{"quote":"原文片段","problem":"问题概述（20字内）","why":"为什么错（40字内）","how":"怎么改（40字内）","rewrite":"改后的句子（可选）","kind":"常识错误|前后矛盾|概念混淆"}}]}}
 
 没发现问题就输出 {{"issues":[]}}。
 
@@ -519,6 +636,12 @@ def _parse_fact_json(raw: str) -> list[dict[str, Any]]:
     return out
 
 
+# 事实核查必须用「非推理模型」：
+# deepseek-flash 是推理模型，实测会把 max_tokens 全花在 reasoning_content 上，
+# content 返回空 → 检查结果 0 条，看起来像"没问题"。这是 02.txt 那个投诉的根因。
+_FACT_MODEL = os.getenv("LITEOFFICE_FACT_MODEL", "deepseek/deepseek-chat")
+
+
 def check_facts(
     text: str,
     model: str | None = None,
@@ -540,7 +663,8 @@ def check_facts(
     from . import llm
 
     text = (text or "").strip()
-    if not text or not llm.has_credentials(model or llm.DEFAULT_MODEL):
+    model = model or _FACT_MODEL
+    if not text or not llm.has_credentials(model):
         return []
 
     res = llm.complete(
@@ -581,11 +705,23 @@ def check_facts(
                 f"第 {pos + 1}–{pos + len(quote)} 字",
                 f"{kind}：{problem}",
                 str(row.get("why") or "").strip() or "与常识或上下文不符",
-                str(row.get("how") or "").strip() or "请对照事实修改",
+                str(row.get("how") or "").strip() or "这条涉及事实/概念，需要按事实核对；可用「按事实试改」生成候选",
                 text[max(0, pos - 12): pos + len(quote) + 12],
                 pos=pos,
             )
         )
+
+        # 模型给了改后句子就带上，前端可直接「一键修改」；
+        # 只挡明显坏结果：代码片段、过短、长度偏离过大
+        _rw = str(row.get("rewrite") or "").strip()
+        if (
+            _rw
+            and not re.search(r"```|\bdef\s+\w+\s*\(|\bprint\s*\(", _rw)
+            and len(_rw) >= 6
+            and 0.4 <= len(_rw) / max(1, len(quote)) <= 2.5
+        ):
+            out[-1]["fix"] = _rw
+            out[-1]["fixFrom"] = quote
         if len(out) >= _FACT_MAX_ISSUES:
             break
     return out

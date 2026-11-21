@@ -21,6 +21,8 @@ export interface KbQaResult {
 }
 
 export interface KbRewriteResult {
+  /** 规则层没有可改之处时，后端不返回候选文本，只给一句说明 */
+  noChange?: boolean
   ok: boolean
   candidate?: string
   genreLabel?: string
@@ -105,10 +107,24 @@ export function askKb(question: string, html: string, kbId = DEFAULT_KB_ID): Pro
   return post<KbQaResult>(`/v1/kb/${kbId}/qa`, { question, topK: 5, html })
 }
 
-/** 专业改写（用当前选区 + 上下文） */
+/**
+ * 改写（用当前选区 + 上下文）
+ *
+ * mode 决定用哪套标准，两者不可混用：
+ *   normalize 规范修正 —— 别写错（的得地/错别字/赘余），幅度受限，结果确定可一键替换
+ *   polish    更优美   —— 允许加意象换句式，只守事实底线（数字/名称/新事件不得变）
+ */
 export function rewriteSelection(
   selection: string,
-  options: { genre?: string; context?: string; kbId?: string } = {},
+  options: {
+    genre?: string
+    context?: string
+    kbId?: string
+    allowModelPolish?: boolean
+    mode?: 'normalize' | 'polish' | 'correct'
+    /** mode=correct 时说明错在哪 */
+    problem?: string
+  } = {},
 ): Promise<KbRewriteResult> {
   // 给了 genre 就按文体选库；只给 kbId 用 kbId；都没有则用默认库
   const kbId = options.kbId ?? kbIdForGenre(options.genre)
@@ -116,5 +132,38 @@ export function rewriteSelection(
     selection,
     genre: options.genre,
     context: options.context,
+    // 「更优美」需要模型润色；后端默认不润色（护栏有盲区），这里显式开启
+    allowModelPolish: options.allowModelPolish === true,
+    mode: options.mode ?? 'normalize',
+  })
+}
+
+
+export interface ContinueResult {
+  ok: boolean
+  continuation: string
+  /** 本次续写依据：cursor=光标前文 / tail=文末 */
+  contextUsed?: 'cursor' | 'tail'
+  /** 续写承接的那一句（上下文最后一句） */
+  anchor?: string
+  /** 与锚句是否有共同实词；false 说明可能跳了场景 */
+  linked?: boolean
+  needsReview?: boolean
+  reason?: string
+  genreLabel?: string
+  chars?: number
+  blocked?: string
+}
+
+/** 续写：接着正文末尾写一段 */
+export async function continueText(
+  html: string,
+  options: { genre?: string; instruction?: string; context?: string } = {},
+): Promise<ContinueResult> {
+  return post<ContinueResult>('/v1/doc/continue', {
+    html,
+    genre: options.genre,
+    instruction: options.instruction ?? '',
+    context: options.context ?? '',
   })
 }

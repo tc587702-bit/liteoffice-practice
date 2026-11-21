@@ -157,3 +157,25 @@ def is_dismissed(rule: str, snippet: str) -> bool:
     finally:
         conn.close()
     return row is not None
+
+
+def reset(fingerprint_value: str | None = None) -> dict[str, Any]:
+    """
+    清掉「不用改」的记忆。
+
+    给了指纹只清这份文档的，没给清全部。
+    用途：报告顶部提示"已跳过 N 条"，用户点「恢复」时调用。
+    """
+    conn = _conn()
+    try:
+        if fingerprint_value:
+            cur = conn.execute(
+                "DELETE FROM issue_feedback WHERE action='dismiss' AND fingerprint=?",
+                (fingerprint_value,),
+            )
+        else:
+            cur = conn.execute("DELETE FROM issue_feedback WHERE action='dismiss'")
+        conn.commit()
+        return {"ok": True, "removed": cur.rowcount}
+    finally:
+        conn.close()

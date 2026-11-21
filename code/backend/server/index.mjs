@@ -221,6 +221,35 @@ async function handleStatic(req, res, url) {
     return json(res, 500, { error: '分享页缺失' })
   }
 
+  // /vendor/* → node_modules 里的协作库（浏览器端 ESM）
+  //
+  // 为什么要本地托管而不是走 CDN：局域网协作常在无外网环境下用，
+  // 依赖 esm.sh 会让页面在断网时完全打不开。这里只白名单放行两个包，
+  // 且拒绝路径穿越，不把整个 node_modules 暴露出去。
+  if (pathname.startsWith('/vendor/')) {
+    const rel = pathname.slice('/vendor/'.length)
+    const pkg = rel.split('/')[0]
+    if (pkg !== 'yjs' && pkg !== 'lib0') {
+      res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' })
+      res.end('Forbidden')
+      return
+    }
+    const safeRel = normalize(rel).replace(/^(\.\.[/\\])+/, '')
+    if (safeRel.includes('..')) {
+      res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' })
+      res.end('Forbidden')
+      return
+    }
+    const target = join(ROOT, 'node_modules', safeRel)
+    if (await serveFile(res, target)) return
+    // yjs 内部按 Node 解析规则写裸名（'lib0/observable'，无扩展名）。
+    // 浏览器不读 package.json 的 exports 映射，所以这里补 .js 再试一次。
+    if (!extname(safeRel) && await serveFile(res, target + '.js')) return
+    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' })
+    res.end('Not found')
+    return
+  }
+
   // 其余优先 public/，再退到 frontend/dist
   const safe = normalize(pathname).replace(/^(\.\.[/\\])+/, '')
   const rel = safe === '/' ? '/index.html' : safe

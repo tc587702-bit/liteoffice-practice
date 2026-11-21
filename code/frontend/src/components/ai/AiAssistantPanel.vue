@@ -6,7 +6,7 @@ import { aiPanelOpen, closeAiPanel } from '../../lib/aiPanelState'
 import { AgentError, runAgent, type AgentRunResult } from '../../lib/agentClient'
 import AppIcon from '../ui/AppIcon.vue'
 import DocCheckReport from './DocCheckReport.vue'
-import { checkDocument, type ImproveReport } from '../../lib/improveClient'
+import { checkDocument, resetIssueFeedback, type ImproveReport } from '../../lib/improveClient'
 import {
   applyIssueMarks,
   clearAllMarks,
@@ -15,10 +15,18 @@ import {
   markRefParagraphs,
   type SelectionInfo,
 } from '../../lib/issueMarks'
-import { askKb, rewriteSelection, type KbCitation } from '../../lib/kbClient'
+import { askKb, continueText, rewriteSelection, type KbCitation } from '../../lib/kbClient'
 import { diffChars, summarizeDiff, type DiffSegment } from '../../lib/diff'
-import { captureRange, rangeAlive, replaceRange, replaceSelection, restoreRange } from '../../lib/editorEdit'
-import { mdSourceActive } from '../../lib/editorViewMode'
+import {
+  appendText,
+  captureRange,
+  insertAtCursor,
+  rangeAlive,
+  replaceRange,
+  replaceSelection,
+  restoreRange,
+  textBeforeCursor,
+} from '../../lib/editorEdit'
 
 /**
  * AI 助手浮层（懒加载 chunk）。
@@ -37,6 +45,9 @@ interface Turn {
   kbAnswer?: string
   citations?: KbCitation[]
   candidate?: string
+  /** 规则层没发现需要改的地方：不显示 diff，直接提示 */
+  noChange?: boolean
+  note?: string
   /** 改写前的原文（用于 diff 对比） */
   source?: string
   /** 生成时保存的选区范围；用户中途点别处也不会替换错位置 */
@@ -59,6 +70,16 @@ const busy = ref(false)
 const checking = ref(false)
 const report = ref<ImproveReport | null>(null)
 const checkError = ref('')
+
+/** 本次检查里，因「不用改」记忆被跳过的条数（>0 时顶部提醒，可恢复） */
+const dismissedHint = ref(0)
+
+async function restoreDismissed() {
+  const removed = await resetIssueFeedback(report.value?.fingerprint ?? '')
+  dismissedHint.value = 0
+  flashNotice(removed ? `已恢复 ${removed} 条建议，重新检查可见` : '没有可恢复的记录')
+  await checkDoc()
+}
 const selection = ref<SelectionInfo | null>(null)
 /** 侧栏三档：问答 / 检查 / 改写 */
 type PanelTab = 'chat' | 'check' | 'rewrite'
@@ -80,6 +101,66 @@ const GENRES = [
 ]
 /** 正文里当前标了多少处 */
 const marked = ref(0)
+/** 是否包含事实/常识检查（需要模型；规则查不出「水往山顶流」这类错误） */
+const useFactCheck = ref(false)
+
+/** 续写状态与结果 */
+const continuing = ref(false)
+const continuation = ref('')
+const continueError = ref('')
+/** 本次续写依据：cursor=光标前文 / tail=文末 */
+const continueSource = ref<'cursor' | 'tail'>('tail')
+/** 本次续写承接的锚句，以及是否可能跳了场景 */
+const continueAnchor = ref('')
+const continueLinked = ref(true)
+
+/** 续写：接着正文末尾写一段（新增内容，不是改写） */
+async function runContinue() {
+  if (!activeDoc.value || continuing.value) return
+  continuing.value = true
+  continueError.value = ''
+  continuation.value = ''
+  flashNotice('正在续写…')
+  // 续写要接着光标所在位置写；光标不在正文里才退回过文末续写
+  const caret = textBeforeCursor(600)
+  try {
+    const res = await continueText(activeDoc.value.html ?? '', {
+      genre: genre.value || undefined,
+      context: caret.inEditor ? caret.text : '',
+    })
+    if (!res.ok) {
+      continueError.value = res.reason || '续写失败'
+      return
+    }
+    continuation.value = res.continuation
+    continueSource.value = res.contextUsed === 'cursor' ? 'cursor' : 'tail'
+    continueAnchor.value = res.anchor ?? ''
+    continueLinked.value = res.linked !== false
+    flashNotice(
+      `续写 ${res.chars ?? res.continuation.length} 字（依据：${continueSource.value === 'cursor' ? '光标前文' : '文末'}）`,
+    )
+  } catch (e) {
+    continueError.value = (e as Error).message || '续写失败'
+  } finally {
+    continuing.value = false
+  }
+}
+
+/** 一键追加到文末 */
+function appendContinuation() {
+  if (!continuation.value) return
+  const res = appendText(continuation.value)
+  flashNotice(res.message)
+  if (res.ok) continuation.value = ''
+}
+
+/** 插入到当前光标处 */
+function insertContinuation() {
+  if (!continuation.value) return
+  const res = insertAtCursor(continuation.value)
+  flashNotice(res.message)
+  if (res.ok) continuation.value = ''
+}
 let noticeTimer: number | null = null
 function flashNotice(text: string) {
   notice.value = text
@@ -133,8 +214,13 @@ async function askKnowledgeBase() {
   }
 }
 
-/** 专业改写：用当前选区 + 前后文（T6） */
-async function rewriteCurrentSelection() {
+/**
+ * 改写选区（T6）
+ *
+ * normalize 规范修正：只改语病，幅度受限，结果确定
+ * polish    更优美：允许加意象换句式，但仍拦编造事实
+ */
+async function rewriteCurrentSelection(mode: 'normalize' | 'polish' = 'normalize') {
   const sel = selection.value ?? currentSelection()
   const savedRange = captureRange()
   if (!activeDoc.value || busy.value || inFlight) return
@@ -147,7 +233,7 @@ async function rewriteCurrentSelection() {
   inFlight = true
   const turn: Turn = {
     id: ++seed,
-    question: `改写选区：${sel.text.slice(0, 30)}…`,
+    question: `${mode === 'polish' ? '润色' : '规范修正'}选区：${sel.text.slice(0, 30)}…`,
     status: 'loading',
     seconds: 0,
     mode: 'rewrite',
@@ -162,12 +248,21 @@ async function rewriteCurrentSelection() {
     turn.seconds += 1
   }, 1000)
   try {
-    const res = await rewriteSelection(sel.text, { context: sel.context, genre: genre.value || undefined })
+    // 两套模式两套护栏：规范修正卡幅度，润色只守事实底线。
+    // 润色显式开启模型（后端默认不润色，护栏有盲区）。
+    const res = await rewriteSelection(sel.text, {
+      context: sel.context,
+      genre: genre.value || undefined,
+      allowModelPolish: mode === 'polish',
+      mode,
+    })
     if (!res.ok) {
       turn.status = 'error'
       turn.error = { message: res.reason || '改写被拒绝', retryable: false }
     } else {
       turn.candidate = res.candidate ?? ''
+    turn.noChange = res.noChange === true
+    turn.note = res.reason ?? ''
       turn.changes = res.changes ?? []
       turn.hint = [res.genreLabel ? `文体：${res.genreLabel}` : '', res.mock ? '离线模拟' : ''].filter(Boolean).join(' · ')
       turn.status = 'done'
@@ -233,7 +328,9 @@ async function checkDoc() {
   checking.value = true
   checkError.value = ''
   try {
-    report.value = await checkDocument(activeDoc.value.html ?? '')
+    const res = await checkDocument(activeDoc.value.html ?? '', { useModel: useFactCheck.value })
+    report.value = res
+    dismissedHint.value = res.dismissedCount ?? 0
     marked.value = applyIssueMarks(report.value)
   } catch (e) {
     checkError.value = (e as Error).message || '检查失败'
@@ -279,6 +376,32 @@ onMounted(() => {
   window.addEventListener('online', updateOnline)
   window.addEventListener('offline', updateOnline)
   document.addEventListener('selectionchange', refreshSelection)
+})
+
+// 报告里点了「一键修改 / 一键改写」：正文已变，重新检查一遍并给一句提示
+async function onIssueFixed() {
+  // 不自动重查：重查会立刻把标记重新画上去，用户会觉得"刚改完又冒出来"
+  flashNotice('已改到正文，可用 Ctrl+Z 撤销；点「重新检查」可更新结果')
+}
+
+function onIssueDismissed() {
+  flashNotice('已记为「不用改」，下次检查不会再提示这一处')
+}
+
+function onFixFailed(e: Event) {
+  const message = (e as CustomEvent<{ message?: string }>).detail?.message
+  flashNotice(message || '这一处没改成，可手动修改')
+}
+
+onMounted(() => {
+  window.addEventListener('lo:issue-fixed', onIssueFixed)
+  window.addEventListener('lo:fix-failed', onFixFailed as EventListener)
+  window.addEventListener('lo:issue-dismissed', onIssueDismissed)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('lo:issue-fixed', onIssueFixed)
+  window.removeEventListener('lo:fix-failed', onFixFailed as EventListener)
 })
 
 onBeforeUnmount(() => {
@@ -409,7 +532,7 @@ watch(aiPanelOpen, (open) => {
     <section
       v-if="aiPanelOpen"
       aria-label="AI 助手"
-      class="lo-glass z-30 flex h-full w-[360px] shrink-0 flex-col overflow-hidden border-l border-white/[0.06]"
+      class="lo-glass lo-glass-strong z-30 flex h-full w-[360px] shrink-0 flex-col overflow-hidden border-l border-white/[0.06]"
     >
       <header class="flex shrink-0 items-center gap-2 border-b border-white/[0.06] px-4 py-3">
         <span class="flex h-7 w-7 items-center justify-center rounded-[9px] bg-[#0A84FF]/15">
@@ -482,6 +605,14 @@ watch(aiPanelOpen, (open) => {
             >
               {{ checking ? '检查中…' : report ? '重新检查' : '检查这份文档' }}
             </button>
+
+            <label
+              class="mt-1 flex cursor-pointer items-center gap-1.5 text-[11px] text-[#98989D] hover:text-[#F5F5F7]"
+              title="事实与常识错误（如「水往山顶流」）规则查不出，需要模型"
+            >
+              <input v-model="useFactCheck" type="checkbox" class="h-3 w-3 accent-[#0A84FF]" />
+              含事实检查（需模型，慢几秒）
+            </label>
             <button
               v-if="marked > 0"
               type="button"
@@ -498,14 +629,22 @@ watch(aiPanelOpen, (open) => {
             <p class="text-[12px] text-[#FF8A84]">{{ checkError }}</p>
             <button class="mt-1 text-[11.5px] text-[#0A84FF]" type="button" @click="checkDoc()">重试</button>
           </div>
-          <DocCheckReport v-else-if="report" :report="report" />
+          <template v-else-if="report">
+              <div
+                v-if="dismissedHint > 0"
+                class="mb-2 flex items-center justify-between gap-2 rounded-[10px] border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-[11px] text-[#98989D]"
+              >
+                <span>已按记忆跳过 {{ dismissedHint }} 条（上次标记为「不用改」）</span>
+                <button type="button" class="shrink-0 text-[#6FB6FF] hover:underline" @click="restoreDismissed">
+                  恢复
+                </button>
+              </div>
+              <DocCheckReport :report="report" />
+            </template>
         </div>
 
         <!-- ===== 改写档 ===== -->
         <div v-else-if="tab === 'rewrite'" class="flex flex-col gap-3">
-          <p v-if="mdSourceActive" class="rounded-[12px] border border-[#FF9F0A]/30 bg-[#FF9F0A]/[0.06] px-3 py-2 text-[12px] leading-relaxed text-[#FFB340]">
-            当前是 Markdown 源码模式。源码里没有可划选的正文，切到「预览」后即可选区改写。
-          </p>
           <div v-if="selection" class="rounded-[12px] border border-[#30D158]/30 bg-[#30D158]/[0.06] p-3">
             <p class="mb-1 text-[11px] text-[#30D158]">选中的正文（{{ selection.text.length }} 字）</p>
             <p class="max-h-24 overflow-y-auto text-[12px] leading-relaxed text-[#D9D9DE]">{{ selection.text }}</p>
@@ -524,17 +663,114 @@ watch(aiPanelOpen, (open) => {
             </select>
           </div>
 
-          <button
-            type="button"
-            class="lo-press rounded-full bg-[#0A84FF] px-3 py-1.5 text-[12px] font-medium text-white disabled:opacity-40"
-            :disabled="!selection || busy || mdSourceActive"
-            @click="rewriteCurrentSelection()"
-          >
-            {{ busy ? '生成中…' : '按规范改写这段' }}
-          </button>
+          <!-- 两个模式两套护栏：规范修正卡幅度、结果确定；润色允许加意象但拦编造 -->
+          <div class="flex flex-col gap-2">
+            <div class="flex items-center gap-2">
+              <button
+                type="button"
+                class="lo-press flex-1 rounded-full border border-white/[0.12] bg-[#1F1F21] px-3 py-1.5 text-[12px] font-medium text-[#F5F5F7] disabled:opacity-40"
+                :disabled="!selection || busy"
+                @click="rewriteCurrentSelection('normalize')"
+              >
+                {{ busy ? '处理中…' : '规范修正' }}
+              </button>
+              <button
+                type="button"
+                class="lo-press flex-1 rounded-full bg-[#0A84FF] px-3 py-1.5 text-[12px] font-medium text-white disabled:opacity-40"
+                :disabled="!selection || busy"
+                @click="rewriteCurrentSelection('polish')"
+              >
+                {{ busy ? '处理中…' : '改写得更优美' }}
+              </button>
+              <button
+                type="button"
+                class="lo-press rounded-full border border-[#30D158]/50 px-3 py-1.5 text-[12px] font-medium text-[#7BE495] disabled:opacity-40"
+                :disabled="continuing || !activeDoc"
+                title="接着正文末尾往下写一段，写完可一键追加"
+                @click="runContinue"
+              >
+                {{ continuing ? '续写中…' : '续写' }}
+              </button>
+            </div>
+
+            <!-- 续写结果：确认后再追加，不自动写正文 -->
+            <div v-if="continueError" class="rounded-[10px] border border-[#FFB340]/40 bg-[#FFB340]/10 px-3 py-2 text-[11.5px] text-[#FFC86B]">
+              {{ continueError }}
+            </div>
+            <div v-else-if="continuation" class="flex flex-col gap-2 rounded-[12px] bg-[#1F1F21] p-3">
+              <div class="flex items-center justify-between">
+                <span class="text-[11px] text-[#636366]">
+                  续写结果（{{ continuation.length }} 字）· 依据：{{ continueSource === 'cursor' ? '光标前文' : '文末' }}
+                </span>
+                <span class="text-[10.5px] text-[#636366]">确认后再写入</span>
+              </div>
+              <!-- 承接的锚句：让用户一眼看出接没接上 -->
+              <p v-if="continueAnchor" class="rounded-[8px] bg-white/[0.04] px-2 py-1 text-[11px] leading-relaxed text-[#98989D]">
+                承接：…{{ continueAnchor }}
+              </p>
+              <p v-if="!continueLinked" class="text-[11px] text-[#FFC86B]">
+                这篇衔接可能跳了场景：开头与上句没有共同内容，建议重写或手动调整。
+              </p>
+              <p class="whitespace-pre-wrap text-[12.5px] leading-relaxed text-[#F5F5F7]">{{ continuation }}</p>
+              <div class="flex flex-wrap items-center gap-2">
+                <!-- 主按钮跟着"依据"走：从光标前文续写 → 插入光标处才是接得上的 -->
+                <button
+                  v-if="continueSource === 'cursor'"
+                  type="button"
+                  class="rounded-full bg-[#0A84FF] px-3 py-1 text-[11.5px] font-medium text-white"
+                  @click="insertContinuation"
+                >
+                  插入光标处
+                </button>
+                <button
+                  v-else
+                  type="button"
+                  class="rounded-full bg-[#0A84FF] px-3 py-1 text-[11.5px] font-medium text-white"
+                  @click="appendContinuation"
+                >
+                  追加到文末
+                </button>
+                <button
+                  v-if="continueSource === 'cursor'"
+                  type="button"
+                  class="rounded-full border border-white/[0.12] px-3 py-1 text-[11.5px] text-[#F5F5F7]"
+                  @click="appendContinuation"
+                >
+                  改放文末
+                </button>
+                <button
+                  v-else
+                  type="button"
+                  class="rounded-full border border-white/[0.12] px-3 py-1 text-[11.5px] text-[#F5F5F7]"
+                  @click="insertContinuation"
+                >
+                  插入光标处
+                </button>
+                <button
+                  type="button"
+                  class="rounded-full px-2 py-1 text-[11px] text-[#98989D] hover:text-[#F5F5F7]"
+                  @click="continuation = ''"
+                >
+                  丢弃
+                </button>
+              </div>
+            </div>
+            <p class="text-[10.5px] leading-relaxed text-[#636366]">
+              规范修正：只改语病（的得地、错别字、赘余），幅度受限，可直接替换。
+              更优美：允许加意象、换句式，但数字、人名与新增情节一律拦下。
+            </p>
+          </div>
 
           <template v-for="turn in turns.filter((t) => t.mode === 'rewrite').slice(-1)" :key="turn.id">
             <div v-if="turn.status === 'loading'" class="text-[12px] text-[#98989D]">正在改写… {{ turn.seconds }} 秒</div>
+            <!-- 规则层没发现可改的地方：直接说没问题，不摆一版和原文一样的"改写" -->
+            <div
+              v-else-if="turn.noChange"
+              class="rounded-[12px] border border-[#30D158]/30 bg-[#30D158]/10 px-3 py-2"
+            >
+              <p class="text-[12.5px] font-medium text-[#7BE495]">没有可改的地方</p>
+              <p class="mt-1 text-[11px] text-[#98989D]">{{ turn.note || '规则与模型都没有发现需要修改的地方。' }}</p>
+            </div>
             <div v-else-if="turn.candidate !== undefined" class="flex flex-col gap-2">
               <!-- diff 对比：红=删，绿=增 -->
               <div class="rounded-[12px] bg-[#1F1F21] p-3">
@@ -803,9 +1039,9 @@ watch(aiPanelOpen, (open) => {
             type="button"
             class="rounded-full border border-white/[0.08] px-2.5 py-1 text-[11px] text-[#A1A1A6] hover:bg-white/[0.06] hover:text-[#F5F5F7] disabled:opacity-40"
             :disabled="busy || !selection"
-            @click="rewriteCurrentSelection()"
+            @click="rewriteCurrentSelection('normalize')"
           >
-            改写选区
+            规范修正选区
           </button>
         </div>
 

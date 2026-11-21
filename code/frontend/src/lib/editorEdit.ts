@@ -4,7 +4,6 @@
  * 走原生选区 + input 事件，让 Editor.vue 的 onInput 接管：
  * 这样替换会进撤销栈、会触发保存，跟用户手打完全一样。
  */
-import { requestPreviewView } from './editorViewMode'
 
 export interface ReplaceResult {
   ok: boolean
@@ -63,17 +62,7 @@ export function hasEditorSelection(): boolean {
 export function focusBlock(index: number): boolean {
   if (!Number.isInteger(index) || index < 0) return false
   const host = document.querySelector('.lo-editor') as HTMLElement | null
-  if (!host) {
-    // md 源码模式没有富文本 DOM：请编辑器切回预览后再定位，避免「点了没反应」
-    if (previewRetryPending) return false
-    if (!requestPreviewView()) return false
-    previewRetryPending = true
-    requestAnimationFrame(() => {
-      previewRetryPending = false
-      focusBlock(index)
-    })
-    return true
-  }
+  if (!host) return false
   const blocks = Array.from(host.children) as HTMLElement[]
   const el = blocks[index]
   if (!el) return false
@@ -90,9 +79,6 @@ export function focusBlock(index: number): boolean {
   sel.addRange(range)
   return true
 }
-
-/** 源码模式切回预览时的重试闸门，防止反复排队 */
-let previewRetryPending = false
 
 /**
  * 保存当前选区（生成改写时调用）。
@@ -162,7 +148,12 @@ export function restoreRange(range: Range | null): boolean {
  * 用于「深度分析」给出的具体改写：模型只给原文片段与改后文本，
  * 前端负责精确替换那一段文字，而不是整段覆盖（避免丢格式）。
  */
-export function replaceTextInBlock(blockIndex: number, quote: string, rewrite: string): ReplaceResult {
+export function replaceTextInBlock(
+  blockIndex: number,
+  quote: string,
+  rewrite: string,
+  span?: { start: number; len: number } | null,
+): ReplaceResult {
   const host = document.querySelector('.lo-editor') as HTMLElement | null
   if (!host) return { ok: false, message: '没有打开文档' }
   const block = (Array.from(host.children) as HTMLElement[])[blockIndex]
@@ -172,16 +163,254 @@ export function replaceTextInBlock(blockIndex: number, quote: string, rewrite: s
   if (!needle) return { ok: false, message: '缺少原文片段' }
 
   const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT)
+  const nodes: Text[] = []
   let node = walker.nextNode() as Text | null
   while (node) {
-    const text = node.nodeValue ?? ''
+    nodes.push(node)
+    node = walker.nextNode() as Text | null
+  }
+
+  // ① 有精确位置：按偏移替换。
+  //    必须走这条 —— 同一段里常有多个「的」「还有」，按第一个匹配改会改错地方：
+  //    该改的没改（问题还在），不该改的被改了（冒出新问题）。
+  const spanMatchesQuote =
+    !!span &&
+    Number.isInteger(span.start) &&
+    span.start >= 0 &&
+    span.len > 0 &&
+    span.len === needle.length
+
+  if (span && spanMatchesQuote) {
+    let acc = 0
+    for (const t of nodes) {
+      const text = t.nodeValue ?? ''
+      const from = acc
+      const to = acc + text.length
+      if (from <= span.start && span.start + span.len <= to) {
+        const offset = span.start - from
+        t.nodeValue = text.slice(0, offset) + rewrite + text.slice(offset + span.len)
+        host.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: rewrite }))
+        return { ok: true, message: '已替换，可 Ctrl+Z 撤销' }
+      }
+      acc = to
+    }
+  }
+
+  // ② 没有 span：退回「第一个匹配」（原文片段唯一时才可靠）
+  for (const t of nodes) {
+    const text = t.nodeValue ?? ''
     const at = text.indexOf(needle)
     if (at !== -1) {
-      node.nodeValue = text.slice(0, at) + rewrite + text.slice(at + needle.length)
+      t.nodeValue = text.slice(0, at) + rewrite + text.slice(at + needle.length)
       host.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: rewrite }))
       return { ok: true, message: '已替换，可 Ctrl+Z 撤销' }
     }
-    node = walker.nextNode() as Text | null
   }
   return { ok: false, message: '没找到原文片段（可能已被改动）' }
+}
+
+
+/** 读取第 blockIndex 段的纯文本（用于「一键改写」把整句交给模型） */
+export function getBlockText(blockIndex: number): string {
+  const host = document.querySelector('.lo-editor') as HTMLElement | null
+  if (!host) return ''
+  const block = (Array.from(host.children) as HTMLElement[])[blockIndex]
+  return (block?.innerText ?? '').trim()
+}
+
+
+/** 在正文末尾追加一段（续写用）。返回是否成功 */
+export function appendText(text: string): ReplaceResult {
+  const host = document.querySelector('.lo-editor') as HTMLElement | null
+  if (!host) return { ok: false, message: '没有打开文档' }
+  if (!text.trim()) return { ok: false, message: '内容为空' }
+
+  const p = document.createElement('p')
+  p.textContent = text.trim()
+  host.appendChild(p)
+  host.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }))
+  p.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  return { ok: true, message: '已追加到文末，可 Ctrl+Z 撤销' }
+}
+
+/** 在当前光标处插入文本（不替换选区内容） */
+export function insertAtCursor(text: string): ReplaceResult {
+  const sel = window.getSelection()
+  if (!sel || sel.rangeCount === 0) return { ok: false, message: '请先把光标放到正文里' }
+  const range = sel.getRangeAt(0)
+  const host = (range.startContainer as Element | Text).parentElement?.closest('.lo-editor')
+  if (!host) return { ok: false, message: '光标不在正文里' }
+  range.deleteContents()
+  const node = document.createTextNode(text)
+  range.insertNode(node)
+  range.setStartAfter(node)
+  range.collapse(true)
+  sel.removeAllRanges()
+  sel.addRange(range)
+  ;(host as HTMLElement).dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }))
+  return { ok: true, message: '已插入，可 Ctrl+Z 撤销' }
+}
+
+
+/**
+ * 取光标之前的正文（最多 maxChars 字）。
+ *
+ * 用途：续写必须从"光标所在位置"往前接，用文末内容去生成、再插到光标处会接不上。
+ * 返回 inEditor=false 表示光标不在正文里，调用方应退回过文末续写。
+ */
+export function textBeforeCursor(maxChars = 600): { text: string; inEditor: boolean } {
+  const sel = window.getSelection()
+  if (!sel || sel.rangeCount === 0) return { text: '', inEditor: false }
+  const range = sel.getRangeAt(0)
+  const node = range.startContainer
+  const el = (node instanceof Element ? node : node.parentElement) ?? null
+  const host = el?.closest('.lo-editor')
+  if (!host) return { text: '', inEditor: false }
+
+  // 收集光标之前的所有文本：先取完整 Range（块的起点 → 光标），再从中截尾部
+  const before = document.createRange()
+  before.setStart(host, 0)
+  before.setEnd(range.startContainer, range.startOffset)
+  const text = (before.toString() || '').replace(/\s+$/, '')
+  return { text: text.slice(-maxChars), inEditor: true }
+}
+
+
+/**
+ * 把光标落到 blockIndex 里第 start 个字处，返回该位置所在的元素。
+ *
+ * 用于「定位到问题」：光标停在出错处，且只闪那一小段，
+ * 而不是把整段（可能上百字）都高亮一片。
+ */
+export function focusSpan(
+  blockIndex: number,
+  start: number,
+  len = 0,
+): { ok: boolean; element?: HTMLElement } {
+  const host = document.querySelector('.lo-editor') as HTMLElement | null
+  if (!host) return { ok: false }
+  const blocks = Array.from(host.children) as HTMLElement[]
+  const el = blocks[blockIndex]
+  if (!el) return { ok: false }
+
+  el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  host.focus({ preventScroll: true })
+
+  // 在块内按字符偏移找目标文本节点
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
+  let acc = 0
+  let node: Text | null = null
+  let offset = 0
+  while (walker.nextNode()) {
+    const t = walker.currentNode as Text
+    const textLen = t.data.length
+    if (acc + textLen >= start) {
+      node = t
+      offset = Math.max(0, Math.min(textLen, start - acc))
+      break
+    }
+    acc += textLen
+  }
+  if (!node) {
+    // 偏移超出块长度：退回到段尾
+    const range = document.createRange()
+    range.selectNodeContents(el)
+    range.collapse(false)
+    window.getSelection()?.removeAllRanges()
+    window.getSelection()?.addRange(range)
+    return { ok: true, element: el }
+  }
+
+  const range = document.createRange()
+  range.setStart(node, offset)
+  range.collapse(true) // 光标落在出错处，不选中整段
+  const sel = window.getSelection()
+  if (!sel) return { ok: false }
+  sel.removeAllRanges()
+  sel.addRange(range)
+
+  // 找到包含这个位置的元素：优先已包好的问题标记（只闪那几个字）
+  const wrapper = (node.parentElement?.closest('.lo-issue-inline') as HTMLElement | null) ?? el
+  void len
+  return { ok: true, element: wrapper }
+}
+
+
+/**
+ * 按引文定位：在块内找到 excerpt 文本，只闪那一小段。
+ *
+ * 用于没有精确 span 的问题（事实类等）——否则只能闪整段，
+ * 一段两百字整体高亮，用户根本看不出错在哪。
+ */
+export function focusQuote(
+  blockIndex: number,
+  quote: string,
+): { ok: boolean; element?: HTMLElement } {
+  const host = document.querySelector('.lo-editor') as HTMLElement | null
+  if (!host) return { ok: false }
+  const el = Array.from(host.children)[blockIndex] as HTMLElement | undefined
+  if (!el) return { ok: false }
+  const key = (quote || '').trim().slice(0, 20)
+  if (!key) return { ok: false }
+
+  const full = el.textContent || ''
+  const at = full.indexOf(key)
+  if (at < 0) return { ok: false }
+
+  el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  host.focus({ preventScroll: true })
+  return focusSpan(blockIndex, at, key.length)
+}
+
+
+/**
+ * 只闪「某几个字」：把 [start, start+len) 临时包一层 span 做高亮动画。
+ *
+ * 为什么不直接给块加 class：块级标记（`.lo-issue-mark` 落在整段 <p> 上）时，
+ * 一加就是两百字一起变色，看着像选中了整段。这里按字符范围精确到词。
+ */
+export function flashSpan(blockIndex: number, start: number, len: number): boolean {
+  const host = document.querySelector('.lo-editor') as HTMLElement | null
+  if (!host) return false
+  const el = Array.from(host.children)[blockIndex] as HTMLElement | undefined
+  if (!el) return false
+
+  const pointAt = (target: number): { node: Text; offset: number } | null => {
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
+    let acc = 0
+    while (walker.nextNode()) {
+      const t = walker.currentNode as Text
+      const l = t.data.length
+      if (acc + l >= target) return { node: t, offset: Math.max(0, Math.min(l, target - acc)) }
+      acc += l
+    }
+    return null
+  }
+
+  const from = pointAt(start)
+  if (!from) return false
+  const to = pointAt(start + Math.max(1, len))
+
+  const range = document.createRange()
+  range.setStart(from.node, from.offset)
+  if (to) range.setEnd(to.node, to.offset)
+  else range.setEnd(from.node, from.node.data.length)
+
+  const box = document.createElement('span')
+  box.className = 'lo-locate-flash'
+  try {
+    // 不能 surroundContents：选区跨过已有内联标记时会抛异常（问题标记把文字包住了）
+    const frag = range.extractContents()
+    box.appendChild(frag)
+    range.insertNode(box)
+  } catch {
+    return false
+  }
+  window.setTimeout(() => {
+    const parent = box.parentNode
+    if (!parent) return
+    while (box.firstChild) parent.insertBefore(box.firstChild, box)
+    parent.removeChild(box)
+  }, 1700)
+  return true
 }

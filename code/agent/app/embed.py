@@ -354,6 +354,10 @@ def vector_search(kb_id: str, query_vec: Sequence[float], top_k: int = 5, min_si
             "heading": r["heading"],
             "text": r["text"],
             "score": round(s, 4),
+            # 保留原始余弦值。融合后 score 会被 RRF 排名分覆盖，
+            # 下游闸门就拿不到「这条是语义高置信召回」的证据了。
+            "sim": round(s, 4),
+            "viaVector": True,
         }
         for s, r in kept[:top_k]
     ]
@@ -600,7 +604,10 @@ def _selftest() -> int:
         check("分数在 [-1,1]", bool(hits) and all(-1.0 <= h["score"] <= 1.0 for h in hits))
 
         print("\n=== 9) 混合检索与 RRF 融合 ===")
-        hy = hybrid_search(kb_id, "征地拆迁安置补偿", emb, top_k=5)
+        # 本节测的是「融合机制有两条路参与」，与相似度阈值无关；
+        # 阈值默认 0.38 是为真实 bge 标定的，测试用的哈希嵌入器分数远低于它，
+        # 因此这里显式关掉阈值，阈值本身在 §10 单独验证。
+        hy = hybrid_search(kb_id, "征地拆迁安置补偿", emb, top_k=5, min_sim=0.0)
         check("融合有结果", len(hy["hits"]) > 0, f"BM25 {hy['bm25Count']} / 向量 {hy['vectorCount']}")
         check("两路都参与", hy["bm25Count"] > 0 and hy["vectorCount"] > 0)
         check("结果不超过 top_k", len(hy["hits"]) <= 5)

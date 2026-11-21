@@ -26,6 +26,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -630,14 +631,31 @@ _META_WORDS = (
 )
 
 
+# 闸门放行「语义召回」所需的最低余弦相似度。
+#
+# 标定（6 库 × 29 个查询）：相关最低 0.3999、无关最高 0.3657，间隔 0.0342。
+#   0.38 → 放行相关 15/15，放进无关 0/14   ← 取这个
+#   0.42 → 放行相关 13/15
+#   0.45 → 只放行 10/15（「人物刻画」0.3999、「心理活动怎么写」0.4154 被挡）
+#
+# 为什么需要：闸门原来只认字面重叠，而「细节描写」「论点」这类**概念性提问**
+# 天然不会在语料里字面出现——那正是语义检索该发挥作用的场景，却被整条砍掉。
+# 实测记叙文「细节描写」向量命中 0.5158，仍被判 0 条。
+GATE_SEMANTIC_SIM = 0.38
+
+
 def _relevance_gate(query: str, hits: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
-    召回之后再拦一道：与问句没有任何词面重叠的命中一律丢掉。
+    召回之后再拦一道，防止「无命中就拒答」被破坏。
 
-    为什么需要：向量相似度下限从 0.45 降到 0.38 后，换说法的召回率上去了，
-    但无关问题也可能捞到东西，「无命中就拒答」这条行为被破坏。
-    这里不调阈值，而是要求命中至少有一个 2-gram 与问句相同——
-    「火星探测器着陆」与公文库没有任何共同片段，因此会正确返回空。
+    两条放行路径，满足任一即保留：
+      ① 字面：命中至少有一个 2-gram 与问句相同（原逻辑，默认路径）
+      ② 语义：命中来自向量路，且原始余弦 ≥ GATE_SEMANTIC_SIM
+              —— 补这条是因为纯字面判据会把「细节描写」这类概念提问的
+                 正确语义召回全部砍掉，让向量检索在该场景形同失效。
+
+    拒答行为不受影响：无关问题（火星探测器、量子纠缠）实测最高 0.3657，
+    低于 0.38，两条规则都过不了。
     """
     flat = re.sub(r"[^\u4e00-\u9fa5a-zA-Z0-9]", "", query or "")
     # 先去掉「知识库/文档/说说」这类提问套话：它们几乎在每条语料里都出现，
@@ -648,33 +666,66 @@ def _relevance_gate(query: str, hits: list[dict[str, Any]]) -> list[dict[str, An
     if len(grams) < 2:
         return hits
 
+    # 只有短概念词才允许"纯语义召回"；长查询必须字面沾边（见文件头说明）
+    semantic_allowed = len(flat) <= 6 and not re.search(r"[0-9A-Za-z]", flat)
+
     kept: list[dict[str, Any]] = []
     for h in hits:
         text = (h.get("text") or "") + (h.get("title") or "")
         if any(g in text for g in grams):
             kept.append(h)
+            continue
+        # 字面不重叠时，只有「短概念词查询」才允许走语义放行。
+        # 长查询（≥7 字）字面完全不沾边，基本就是另一个话题 —— 放行会破坏拒答。
+        sim = h.get("sim")
+        if (
+            semantic_allowed
+            and isinstance(sim, (int, float))
+            and sim >= GATE_SEMANTIC_SIM
+        ):
+            kept.append(h)
     return kept
+
+
+_EMBEDDER_RETRY_SECONDS = float(os.getenv("LITEOFFICE_EMBED_RETRY", "20"))
+_EMBEDDER_FAILED_AT = 0.0
 
 
 def _get_embedder() -> Any:
     """
     懒加载本地嵌入器；拿不到就返回 None，检索自动退化为纯 BM25。
 
-    不在模块顶层 import：torch/模型是可选依赖，缺了不该让整个 multigenre 无法导入。
-    首次加载约 1 秒，之后走 embed_local 的进程内单例。
+    关键：失败**不永久缓存**。
+    torch / 模型文件可能在启动时还没就绪（外接盘挂载、首次下载、内存紧张），
+    若失败就置成"试过了"，整个进程会一直只用 BM25，向量召回静默失效。
+    这里失败后按冷却时间（默认 20 秒）允许重试，成功即清除错误。
     """
-    global _EMBEDDER, _EMBEDDER_TRIED, _EMBEDDER_ERROR
-    if _EMBEDDER_TRIED:
+    global _EMBEDDER, _EMBEDDER_TRIED, _EMBEDDER_ERROR, _EMBEDDER_FAILED_AT
+    import time
+
+    if _EMBEDDER is not None:
         return _EMBEDDER
+    now = time.time()
+    if _EMBEDDER_TRIED and now - _EMBEDDER_FAILED_AT < _EMBEDDER_RETRY_SECONDS:
+        return None  # 冷却中，避免每次请求都去加载模型（几百毫秒）
+
     _EMBEDDER_TRIED = True
     try:
         from .embed_local import get_embedder
 
         _EMBEDDER = get_embedder()
+        _EMBEDDER_ERROR = ""
+        return _EMBEDDER
     except Exception as e:  # noqa: BLE001 缺 torch/模型/显存都归这里，检索退化为 BM25 而不是整体失败
         _EMBEDDER = None
         _EMBEDDER_ERROR = f"{type(e).__name__}: {e}"
-    return _EMBEDDER
+        _EMBEDDER_FAILED_AT = now
+        return None
+
+
+def embedder_error() -> str:
+    """嵌入器当前不可用的原因（供诊断；空串表示正常）"""
+    return _EMBEDDER_ERROR
 
 
 def search_genre(

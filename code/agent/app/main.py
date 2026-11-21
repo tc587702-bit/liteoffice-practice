@@ -282,11 +282,17 @@ class QaPayload(BaseModel):
 
 
 class RewritePayload(BaseModel):
+    allowModelPolish: bool = False   # 默认不润色：记叙类只做语言规范
     selection: str
     genre: str | None = None
     context: str = ""        # 选区前后各 200 字（可选）
     topK: int = 3
     model: str | None = None
+    # normalize=规范修正（别写错，幅度受限）/ polish=更优美（允许加意象，只守事实底线）
+    # correct=按事实改正（允许改事实，仅用于「常识错误/概念混淆/前后矛盾」）
+    mode: str = "normalize"
+    # mode=correct 时用它说明错在哪
+    problem: str = ""
 
 
 @app.post("/v1/kb/{kb_id}/qa")
@@ -309,17 +315,22 @@ def kb_rewrite(kb_id: str, payload: RewritePayload) -> dict[str, Any]:
         genre=payload.genre,
         model=payload.model,
         top_k=payload.topK,
-        context=payload.context,
+        context=payload.problem or payload.context,
+        allow_model_polish=payload.allowModelPolish,
+        mode=payload.mode,
     )
 
 class ImprovePayload(BaseModel):
     html: str
+    genre: str | None = None
+    # 事实/常识检查需要模型（规则查不出「水往山顶流」），默认关闭保持离线可复现
+    useModel: bool = False
 
 
 @app.post("/v1/doc/improve")
 def doc_improve_route(payload: ImprovePayload) -> dict[str, Any]:
     """文档优化建议：分数 + 带位置的问题清单"""
-    return IMPROVE.analyze(payload.html)
+    return IMPROVE.analyze(payload.html, genre=payload.genre, use_model=payload.useModel)
 
 class FeedbackPayload(BaseModel):
     fingerprint: str = ""
@@ -387,3 +398,33 @@ def doc_review_status() -> dict[str, Any]:
         "model": "qwen2.5-1.5b-instruct",
         "modelDir": str(REVIEW_LOCAL.MODEL_DIR),
     }
+
+class ContinuePayload(BaseModel):
+    html: str
+    genre: str | None = None
+    instruction: str = ""
+    model: str | None = None
+    # 光标之前的正文；给了就按它续写（而不是文末）
+    context: str = ""
+
+
+@app.post("/v1/doc/continue")
+def doc_continue(payload: ContinuePayload) -> dict[str, Any]:
+    """续写：接着正文末尾写一段，返回可一键追加的文本"""
+    return PIPE.continue_text(
+        payload.html,
+        genre=payload.genre,
+        instruction=payload.instruction,
+        model=payload.model,
+        cursor_context=payload.context,
+    )
+
+
+class FeedbackResetPayload(BaseModel):
+    fingerprint: str = ""
+
+
+@app.post("/v1/doc/feedback/reset")
+def doc_feedback_reset(payload: FeedbackResetPayload) -> dict[str, Any]:
+    """清掉「不用改」的记忆（报告里点「恢复」时调用）"""
+    return FEEDBACK.reset(payload.fingerprint or None)
