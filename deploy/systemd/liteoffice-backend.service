@@ -1,0 +1,30 @@
+[Unit]
+Description=LiteOffice collaboration backend
+Documentation=file:///opt/liteoffice/deploy/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=liteoffice
+Group=liteoffice
+WorkingDirectory=/opt/liteoffice/code/backend
+
+Environment=NODE_ENV=production
+Environment=PORT=3000
+Environment=AGENT_ORIGIN=http://127.0.0.1:8100
+Environment=LITEOFFICE_DB=/var/lib/liteoffice/liteoffice.db
+Environment=LITEOFFICE_LOG_FILE=/var/log/liteoffice/backend.log
+Environment=LITEOFFICE_LOG_LEVEL=info
+
+ExecStart=/usr/bin/node server/index.mjs
+Restart=always
+RestartSec=3
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/var/lib/liteoffice /var/log/liteoffice
+
+[Install]
+WantedBy=multi-user.target

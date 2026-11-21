@@ -1,0 +1,12 @@
+# 可选：让访问地址从 http://IP:3000 变成 http://IP
+# 仅监听 80，不启用 HTTPS（裸 IP 拿不到受信任证书）
+#
+# 安装 Caddy 后：
+#   cp /opt/liteoffice/deploy/Caddyfile /etc/caddy/Caddyfile
+#   systemctl reload caddy
+# 并在轻量防火墙放行 80/tcp。
+
+:80 {
+    encode zstd gzip
+    reverse_proxy 127.0.0.1:3000
+}

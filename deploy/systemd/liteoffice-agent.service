@@ -1,0 +1,27 @@
+[Unit]
+Description=LiteOffice Agent (FastAPI + LangGraph)
+Documentation=file:///opt/liteoffice/deploy/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=liteoffice
+Group=liteoffice
+WorkingDirectory=/opt/liteoffice/code/agent
+
+# 先复制 deploy/agent.env.example 到 /etc/liteoffice/agent.env 并 chmod 600
+EnvironmentFile=/etc/liteoffice/agent.env
+
+# 单 worker：知识库 SQLite 和限流都在进程内，别开多 worker
+ExecStart=/opt/liteoffice/code/agent/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8100 --workers 1
+Restart=always
+RestartSec=3
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/var/lib/liteoffice /var/log/liteoffice
+
+[Install]
+WantedBy=multi-user.target
