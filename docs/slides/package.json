@@ -1,9 +1,9 @@
 {
-  "name": "dabian",
+  "name": "liteoffice-slide",
   "type": "module",
   "private": true,
   "scripts": {
-    "build": "slidev build --base /liteoffce-practice/",
+    "build": "slidev build --base /liteoffice-practice/",
     "dev": "slidev --open",
     "export": "slidev export"
   },
