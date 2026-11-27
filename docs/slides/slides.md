@@ -1,18 +1,19 @@
 ---
-theme: default
+
+## theme: default
 title: LiteOffice 产品设计文档
 info: |
-  本地优先的 Office 文档工作台
-  配套本地 AI 助手与局域网协作
-  产品设计说明
+  本地优先的 Office 文档工作台
+  配套本地 AI 助手与局域网协作
+  产品设计说明
 transition: slide-left
 layout: cover
----
 
 # LiteOffice 产品设计文档
 
-> 产品定位：一个在浏览器本地完成文档解析、编辑与导出的轻量工作台，配套本地 AI 助手与局域网多人协作。
-> 支持格式：DOCX、XLSX、PPTX、Markdown、PDF。
+> 
+> 产品定位：一个在浏览器本地完成文档解析、编辑与导出的轻量工作台，配套本地 AI 助手与局域网多人协作。  
+> 支持格式：DOCX、XLSX、PPTX、Markdown、PDF。  
 > 核心承诺：文件不上传，解析、编辑、导出都留在用户设备上；AI 只辅助不代写，协作不依赖云服务。
 
 ---
@@ -99,11 +100,11 @@ layout: cover
 
 **产品描述的最简单模板**
 
-对于 **需要在本机处理 Word、Excel、PPT、Markdown 和 PDF，并希望得到 AI 写作辅助与局域网协作的学生、教师与办公人员**，
-他们 **希望不上传文件就能快速查看、修改并导出资料，同时担心隐私泄露、格式混乱、大文件卡顿和写作不规范**，
-产品/项目 **LiteOffice** 是一个 **本地优先的轻量 Office 文档工作台**，
-它能够 **在浏览器内完成解析、编辑、会话保存与导出，在需要时调用本机 AI 服务做语病检查 / 知识库问答 / 规范改写，并通过局域网协作服务支持多人同时编辑**，
-不同于 **需要上传服务器的在线文档、安装成本高的桌面办公套件、只支持单一格式的转换器以及整篇代写的 AI 工具**，
+对于 **需要在本机处理 Word、Excel、PPT、Markdown 和 PDF，并希望得到 AI 写作辅助与局域网协作的学生、教师与办公人员**，  
+他们 **希望不上传文件就能快速查看、修改并导出资料，同时担心隐私泄露、格式混乱、大文件卡顿和写作不规范**，  
+产品/项目 **LiteOffice** 是一个 **本地优先的轻量 Office 文档工作台**，  
+它能够 **在浏览器内完成解析、编辑、会话保存与导出，在需要时调用本机 AI 服务做语病检查 / 知识库问答 / 规范改写，并通过局域网协作服务支持多人同时编辑**，  
+不同于 **需要上传服务器的在线文档、安装成本高的桌面办公套件、只支持单一格式的转换器以及整篇代写的 AI 工具**，  
 我们的产品/项目 **零上传、零追踪，AI 只辅助不代写，协作不依赖云服务，边界清晰且可实测验证**。
 
 ---
@@ -122,6 +123,7 @@ layout: cover
 
 ## 1.2.2 对客户的价值
 
+> 
 > 以下用户故事均使用用户可理解的业务语言描述，不包含技术实现细节。
 
 1. 作为**学生**，我想要**把老师发来的 Word 作业直接拖进页面并修改**，以便于**不上传文档也能按时提交作业**。
@@ -242,9 +244,7 @@ layout: cover
 
 仓库：`liteoffice-practice`（分支 `feat/vue-rewrite`）。
 
-<div class="flex justify-center mt-4">
-<img src="./num.png" class="max-w-full max-h-110 rounded shadow" />
-</div>
+![](/num.png)
 
 ---
 
@@ -284,7 +284,7 @@ layout: cover
 | 模块 | 职责 | 主要实现 |
 | --- | --- | --- |
 | 导入与识别 | 拖拽/选择文件，识别格式与大小并分级提示 | 文件卡片、格式标识、可取消进度 |
-| 解析层 | 将 DOCX/XLSX/PPTX/MD/PDF 转为可展示内容 | 自研 docx/xlsx/markdown + SheetJS + pdf.js；Worker 与按需加载 |
+| 解析层 | 将 DOCX/XLSX/PPTX/MD/PDF 转为可展示内容 | 自研 docx/xlsx/markdown/zip/xml + SheetJS + pdf.js；Worker 与按需加载 |
 | 编辑与阅读 | 富文本/表格编辑、分块虚拟渲染、大纲、字数、阅读模式 | contenteditable + 分块虚拟滚动 + 工具栏 + 大纲筛选 |
 | 会话与状态 | 管理多文件、改动标记、进度、Toast 与兜底状态 | Pinia Store + IndexedDB 持久化 |
 | 导出与自检 | 生成文件并校验，失败时兜底 | Blob 下载 + 文件头/内容回读校验 + 原始文件下载 |
@@ -296,9 +296,7 @@ layout: cover
 
 #### 3.5.1 系统架构图
 
-<div class="flex justify-center mt-4">
-<img src="./tool.png" class="max-w-full max-h-110 rounded shadow" />
-</div>
+![](/tool.png)
 
 ---
 
@@ -342,6 +340,15 @@ layout: cover
 
 #### 3.5.4 前端设计
 
+```
+pages（页面：Home / Editor）
+   ↓
+stores（Pinia 会话状态：workspace.ts）
+   ↓
+lib（纯逻辑：docx / xlsx / markdown / pdf / exporter / db / 工具）
+   ↑
+components（只消费状态与回调，不直接调解析器）
+```
 
 - 依赖方向单向；`lib` 内部按底层到高层引用：`zip.ts / xml.ts` ← `docx.ts / xlsx.ts / markdown.ts` ← `exporter.ts`。
 - 运行时依赖仅 5 个（`vue` / `vue-router` / `pinia` / `xlsx` / `pdfjs-dist`），无 UI 组件库、图标库、动画库。
@@ -352,9 +359,7 @@ layout: cover
 
 ### 3.6 软件质量
 
-<div class="flex justify-center mt-4">
-<img src="./apps.png" class="max-w-full max-h-110 rounded shadow" />
-</div>
+![](/apps.png)
 
 ---
 
@@ -383,6 +388,7 @@ layout: cover
 
 ### 3.7 代码统计
 
+> 
 > 快照：2026-11 代码审查（`review-report.md`）。
 
 | 语言 | 文件数 | 行数 |
