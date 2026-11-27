@@ -1,13 +1,13 @@
 ---
-theme: seriph
+theme: penguin
 title: LiteOffice 产品设计文档
 info: |
   本地优先的 Office 文档工作台
   配套本地 AI 助手与局域网协作
-  产品设计说明
 transition: slide-left
 layout: cover
 ---
+
 
 
 <style>
