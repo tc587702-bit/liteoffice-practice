@@ -7,14 +7,23 @@ info: |
   产品设计说明
 transition: slide-left
 layout: cover
-toc: false
 ---
+
+<style>
+.slidev-nav {
+  display: none !important;
+}
+.slidev-controls {
+  display: none !important;
+}
+</style>
 
 # LiteOffice 产品设计文档
 
 > 产品定位：一个在浏览器本地完成文档解析、编辑与导出的轻量工作台，配套本地 AI 助手与局域网多人协作。
 > 支持格式：DOCX、XLSX、PPTX、Markdown、PDF。
 > 核心承诺：文件不上传，解析、编辑、导出都留在用户设备上；AI 只辅助不代写，协作不依赖云服务。
+
 
 
 ---
