@@ -1,0 +1,16 @@
+* {
+  --slidev-nav-width: 0px !important;
+}
+#slidev-nav,
+.slidev-nav,
+.slidev-sidebar,
+.slidev-toc-panel,
+aside[class*="slidev"] {
+  display: none !important;
+  width: 0 !important;
+  border: none !important;
+}
+.slidev-controls,
+.slidev-controls-container {
+  display: none !important;
+}
