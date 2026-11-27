@@ -7,7 +7,7 @@ info: |
   产品设计说明
 transition: slide-left
 layout: cover
-toc:false
+toc: false
 ---
 
 # LiteOffice 产品设计文档
