@@ -1,5 +1,5 @@
 ---
-theme: default
+theme: seriph
 title: LiteOffice 产品设计文档
 info: |
   本地优先的 Office 文档工作台
@@ -8,6 +8,7 @@ info: |
 transition: slide-left
 layout: cover
 ---
+
 
 <style>
 .slidev-nav {
