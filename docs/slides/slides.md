@@ -1,6 +1,6 @@
 ---
 
-## theme: default
+theme: default
 title: LiteOffice 产品设计文档
 info: |
   本地优先的 Office 文档工作台
