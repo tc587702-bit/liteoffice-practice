@@ -233,29 +233,57 @@ td {
 
 #### 3.5.1 系统架构图
 
-```mermaid
-flowchart TB
-  subgraph L1["接入层（浏览器）"]
-    A1["文件拖拽 / 选择"] --> A2["编辑与阅读界面"] --> A3["浏览器入口"]
-  end
-  subgraph L2["前端服务层"]
-    B1["导入与识别"] --> B2["解析层<br/>DOCX / XLSX / PPTX / PDF"] --> B3["编辑与阅读"] --> B4["会话与状态<br/>Pinia + IndexedDB"]
-  end
-  subgraph L3["后端服务层（可选）"]
-    C1["AI Agent<br/>FastAPI + ReAct"] --> C2["检索与护栏<br/>BM25 + 向量 + RRF"]
-  end
-  subgraph L4["数据层"]
-    D1[("IndexedDB<br/>文档与草稿")] 
-    D2[("SQLite kb.db<br/>77 份 / 2486 块")]
-  end
-  A3 --> B1
-  B4 --> D1
-  B3 -.->|"仅 AI 功能时调用"| C1
-  C2 --> D2
-```
+<div class="mt-3 space-y-2 text-sm">
 
-<div class="text-sm opacity-70 mt-2">
-前端可脱离后端独立使用（打开 / 编辑 / 导出全在浏览器）；只有检查、改写、问答需要后端。
+<div class="flex items-stretch gap-2">
+  <div class="w-32 shrink-0 rounded-lg flex items-center justify-center font-semibold text-white" style="background:#2f6feb">接入层</div>
+  <div class="flex-1 grid grid-cols-3 gap-2">
+    <div class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-center" style="color:#1f2937">拖拽 / 选择文件</div>
+    <div class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-center" style="color:#1f2937">编辑与阅读界面</div>
+    <div class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-center" style="color:#1f2937">浏览器入口，无需安装</div>
+  </div>
+</div>
+
+<div class="text-center leading-none" style="color:#6b7280">▼</div>
+
+<div class="flex items-stretch gap-2">
+  <div class="w-32 shrink-0 rounded-lg flex items-center justify-center font-semibold text-white" style="background:#1f9d6b">前端服务层</div>
+  <div class="flex-1 grid grid-cols-4 gap-2">
+    <div class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-center" style="color:#1f2937">导入与识别</div>
+    <div class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-center" style="color:#1f2937">解析层<span class="text-xs" style="color:#6b7280"><br/>DOCX / XLSX / PPTX / PDF</span></div>
+    <div class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-center" style="color:#1f2937">编辑与导出</div>
+    <div class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-center" style="color:#1f2937">会话与状态<span class="text-xs" style="color:#6b7280"><br/>Pinia + IndexedDB</span></div>
+  </div>
+</div>
+
+<div class="text-center leading-none" style="color:#6b7280">▼</div>
+
+<div class="flex items-stretch gap-2">
+  <div class="w-32 shrink-0 rounded-lg flex flex-col items-center justify-center font-semibold text-white" style="background:#b97a12">后端服务层<span class="text-xs font-normal" style="color:#fff8">可选</span></div>
+  <div class="flex-1 grid grid-cols-3 gap-2">
+    <div class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-center" style="color:#1f2937">AI Agent<span class="text-xs" style="color:#6b7280"><br/>FastAPI + ReAct 循环</span></div>
+    <div class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-center" style="color:#1f2937">检索与护栏<span class="text-xs" style="color:#6b7280"><br/>BM25 + 向量 + RRF</span></div>
+    <div class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-center" style="color:#1f2937">REST 接口<span class="text-xs" style="color:#6b7280"><br/>/v1/*</span></div>
+  </div>
+</div>
+
+<div class="text-center leading-none" style="color:#6b7280">▼</div>
+
+<div class="flex items-stretch gap-2">
+  <div class="w-32 shrink-0 rounded-lg flex items-center justify-center font-semibold text-white" style="background:#6b5bd2">数据层</div>
+  <div class="flex-1 grid grid-cols-2 gap-2">
+    <div class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-center" style="color:#1f2937">IndexedDB<span class="text-xs" style="color:#6b7280"><br/>文档正文与草稿（不上传）</span></div>
+    <div class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-center" style="color:#1f2937">SQLite kb.db<span class="text-xs" style="color:#6b7280"><br/>77 份文档 / 2486 块 / 向量</span></div>
+  </div>
+</div>
+
+</div>
+
+<div class="mt-3 text-xs" style="color:#9ca3af">
+技术栈：TypeScript 5.9 · Vue 3 · Vite · Pinia · Tailwind ｜ FastAPI · ReAct · BM25 + ONNX 向量 · SQLite
+</div>
+<div class="mt-1 text-xs" style="color:#9ca3af">
+前端可独立运行（打开 / 编辑 / 导出全在浏览器）；只有检查、改写、问答需要后端。
 </div>
 
 ---
