@@ -247,7 +247,7 @@ canvasWidth: 900
 
 ### 3.3 代码仓库链接及代码提交历史截图
 
-仓库：`liteoffice-practice`（分支 `feat/vue-rewrite`）。
+仓库：`(https://tc587702-bit.github.io/liteoffice-practice/)`
 
 <img src="/num.png" width="420" class="mx-auto" />
 
