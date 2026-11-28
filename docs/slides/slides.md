@@ -90,7 +90,6 @@ layout: cover
 
 # 1.2 产品定义
 
-**产品描述的最简单模板**
 
 对于 **需要本地处理 Word/Excel/PPT/MD/PDF的学生、教师与办公人员**，  
 他们 **希望不上传就能查看、修改并导出，又担心隐私、格式乱、大文件卡、写作不规范**，  
@@ -114,8 +113,6 @@ layout: cover
 
 ## 1.2.2 对客户的价值
 
-> 
-> 以下用户故事均使用用户可理解的业务语言描述，不包含技术实现细节。
 
 1. 作为**学生**，我想**拖入 Word 作业直接改**，以便**不上传也能按时交**。
 2. 作为**财务人员**，我想**改完表格下载回 Excel**，以便**保留原工作表对账**。
@@ -263,8 +260,6 @@ td {
   <div class="flex-1 grid grid-cols-3 gap-2">
     <div class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-center" style="color:#1f2937">AI Agent<span class="text-xs" style="color:#6b7280"><br/>FastAPI + ReAct 循环</span></div>
     <div class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-center" style="color:#1f2937">检索与护栏<span class="text-xs" style="color:#6b7280"><br/>BM25 + 向量 + RRF</span></div>
-    <div class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-center" style="color:#1f2937">REST 接口<span class="text-xs" style="color:#6b7280"><br/>/v1/*</span></div>
-  </div>
 </div>
 
 <div class="text-center leading-none" style="color:#6b7280">▼</div>
