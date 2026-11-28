@@ -9,14 +9,6 @@ transition: slide-left
 layout: cover
 ---
 
-<style>
-.slidev-nav {
-  display: none !important;
-}
-.slidev-controls {
-  display: none !important;
-}
-</style>
 
 # LiteOffice 产品设计文档
 
