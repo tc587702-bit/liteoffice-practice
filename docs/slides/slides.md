@@ -309,7 +309,8 @@ components（只消费状态与回调）
 > 代码位置：`code/agent/app/graph.py`（编排）· `tools.py`（工具）· `polish_guard.py`（护栏）· `embed.py`（检索）· `feedback.py`（记忆）· `code/agent/data/kb.db`（知识库）。
 
 ---
-**LiteOffice 智能体五个组成**
+
+### LiteOffice 智能体五个组成
 
 | 组成 | 代码位置（文件名） | 实现 |
 | --- | --- | --- |
