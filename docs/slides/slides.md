@@ -147,7 +147,7 @@ layout: cover
 网站（纯前端单页应用 + 可选的本地 AI 服务与局域网协作服务）。
 
 ---
-canvasWidth: 1100
+canvasWidth: 900
 ---
 # 2. 产品设计应用的原则
 
