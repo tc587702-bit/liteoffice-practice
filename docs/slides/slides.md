@@ -271,7 +271,6 @@ td {
 
 | 服务 | 方法 | 路径 | 作用 |
 | --- | --- | --- | --- |
-
 | AI | POST | `/v1/agent/run` | LangGraph 编排 |
 | AI | POST | `/v1/chat` | 纯对话，无工具 |
 | AI | POST | `/v1/kb/{kb_id}/search` | BM25 检索（问答出口） |
