@@ -238,7 +238,30 @@ td {
 
 #### 3.5.1 系统架构图
 
-<img src="/tool.png" width="450" class="mx-auto" />
+```mermaid
+flowchart TB
+  subgraph L1["接入层（浏览器）"]
+    A1["文件拖拽 / 选择"] --> A2["编辑与阅读界面"] --> A3["浏览器入口"]
+  end
+  subgraph L2["前端服务层"]
+    B1["导入与识别"] --> B2["解析层<br/>DOCX / XLSX / PPTX / PDF"] --> B3["编辑与阅读"] --> B4["会话与状态<br/>Pinia + IndexedDB"]
+  end
+  subgraph L3["后端服务层（可选）"]
+    C1["AI Agent<br/>FastAPI + ReAct"] --> C2["检索与护栏<br/>BM25 + 向量 + RRF"]
+  end
+  subgraph L4["数据层"]
+    D1[("IndexedDB<br/>文档与草稿")] 
+    D2[("SQLite kb.db<br/>77 份 / 2486 块")]
+  end
+  A3 --> B1
+  B4 --> D1
+  B3 -.->|"仅 AI 功能时调用"| C1
+  C2 --> D2
+```
+
+<div class="text-sm opacity-70 mt-2">
+前端可脱离后端独立使用（打开 / 编辑 / 导出全在浏览器）；只有检查、改写、问答需要后端。
+</div>
 
 ---
 
