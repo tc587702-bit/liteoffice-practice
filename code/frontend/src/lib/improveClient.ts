@@ -14,8 +14,8 @@ export interface ImproveIssue {
   /** 错误片段在段内的精确位置：只高亮这几个字 */
   span?: { start: number; len: number } | null
   /** 规则层给出的改后文本（可直接替换）；没有则说明这条不能自动改 */
-  fix?: string
-  fixFrom?: string
+  fix?: string | null
+  fixFrom?: string | null
   rule?: string
   ruleId?: string
   level: IssueLevel
