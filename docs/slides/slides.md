@@ -249,7 +249,7 @@ canvasWidth: 900
 
 仓库：`liteoffice-practice`（分支 `feat/vue-rewrite`）。
 
-<img src="/num.png" width="450" />
+<img src="/num.png" width="420" class="mx-auto" />
 
 ---
 
