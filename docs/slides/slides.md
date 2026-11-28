@@ -249,7 +249,7 @@ canvasWidth: 900
 
 仓库：`liteoffice-practice`（分支 `feat/vue-rewrite`）。
 
-![](/num.png)(width:80%)
+![](/num.png){width:80%}
 
 ---
 
@@ -296,7 +296,14 @@ canvasWidth: 900
 | AI Agent | 语病检查、知识库问答、规范改写 | FastAPI + LangGraph ReAct + BM25/向量检索 + 护栏 |
 | 协作后端 | 分享链接、Yjs 增量同步、在线状态 | Node + ws + yjs + SQLite（node:sqlite） |
 | 路由与部署 | 首页与编辑页切换，静态托管 | vue-router hash 模式 + Vite 构建 |
-
+<style>
+table {
+  font-size: 0.72em;
+}
+td {
+  line-height: 1.45;
+}
+</style>
 ---
 
 #### 3.5.1 系统架构图
