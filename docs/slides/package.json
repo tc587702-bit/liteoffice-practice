@@ -5,7 +5,8 @@
   "scripts": {
     "build": "slidev build --base /liteoffice-practice/",
     "dev": "slidev --open",
-    "export": "slidev export"
+    "export": "slidev export",
+    "build:defense": "slidev build defense.md --base /liteoffice-practice/defense/ --out dist-defense"
   },
   "devDependencies": {
     "@slidev/cli": "^53.1.0",
