@@ -36,6 +36,14 @@ jobs:
           mkdir -p dist/defense
           cp -r dist-defense/. dist/defense/
 
+      - name: 生成深链接目录（/12、/defense/24 这类地址可直达）
+        run: |
+          for n in $(seq 1 60); do
+            mkdir -p "dist/$n" "dist/defense/$n"
+            cp dist/index.html "dist/$n/index.html"
+            cp dist-defense/index.html "dist/defense/$n/index.html"
+          done
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
