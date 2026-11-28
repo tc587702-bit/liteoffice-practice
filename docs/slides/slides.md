@@ -260,6 +260,7 @@ td {
   <div class="flex-1 grid grid-cols-3 gap-2">
     <div class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-center" style="color:#1f2937">AI Agent<span class="text-xs" style="color:#6b7280"><br/>FastAPI + ReAct 循环</span></div>
     <div class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-center" style="color:#1f2937">检索与护栏<span class="text-xs" style="color:#6b7280"><br/>BM25 + 向量 + RRF</span></div>
+  </div>
 </div>
 
 <div class="text-center leading-none" style="color:#6b7280">▼</div>
