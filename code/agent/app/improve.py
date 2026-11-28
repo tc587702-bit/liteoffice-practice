@@ -12,6 +12,7 @@
 """
 from __future__ import annotations
 
+import difflib
 import re
 from typing import Any
 
@@ -494,6 +495,116 @@ def _attach_spans(issues: list[dict[str, Any]], html: str) -> None:
         it["span"] = span
 
 
+def _minimal_fix(before: str, after: str) -> tuple[str, str] | None:
+    """把「整段替换」收窄成「最小替换」：只保留发生变化的那一段文本。
+
+    例：before="花开的很鲜艳，风轻轻的"  after="花开得很鲜艳，风轻轻地"
+        → ("的很鲜艳，风轻轻的", "得很鲜艳，风轻轻地")，再按前后文收缩到最短。
+    """
+    if not before or before == after:
+        return None
+    sm = difflib.SequenceMatcher(a=before, b=after, autojunk=False)
+    ops = [op for op in sm.get_opcodes() if op[0] != "equal"]
+    if not ops:
+        return None
+    i1 = ops[0][1]
+    i2 = ops[-1][2]
+    j1 = ops[0][3]
+    j2 = ops[-1][4]
+    # 两侧各留 1 个字，避免把「的」这类单字替换变成空串匹配
+    i1 = max(0, i1 - 1)
+    j1 = max(0, j1 - 1)
+    i2 = min(len(before), i2 + 1)
+    j2 = min(len(after), j2 + 1)
+    return before[i1:i2], after[j1:j2]
+
+
+def _accept(it: dict, idx: int, at: int, length: int, accepted: dict) -> None:
+    """同一块内不允许 two 条 fix 的区间重叠：重叠说明会让前一条改完后，后一条找不到原文。"""
+    spans = accepted.setdefault(idx, [])
+    overlap = any(not (at + length <= s or at >= s + l) for s, l in spans)
+    if overlap:
+        it["fix"] = None
+        it["fixFrom"] = None
+        it["fixUnavailable"] = True
+        return
+    spans.append((at, length))
+
+
+def _verify_fix(issues: list[dict], html: str) -> None:
+    """保证每条 fix 都能落地：
+
+    ① 若 fixFrom 在该块里唯一 → 直接可用
+    ② 否则用 pos 反算块内偏移，写入 span；只要 block_text[start:start+len] == fixFrom 就可用
+       （「的」→「得」这类最小替换在段里必然重复，靠 span 定位而不是靠唯一字符串）
+    ③ 两者都不满足 → 清掉 fix，前端不显示「一键修改」
+    """
+    blocks = split_blocks(html)
+    texts = [b.text for b in blocks]
+
+    # 块在纯文本里的起始偏移（与 _attach_blocks 一致：块之间用一个 \n 连接）
+    starts: list[int] = []
+    cursor = 0
+    for text in texts:
+        starts.append(cursor)
+        cursor += len(text) + 1
+
+    accepted: dict[int, list[tuple[int, int]]] = {}
+
+    for it in issues:
+        fix, fix_from = it.get("fix"), it.get("fixFrom")
+        if fix is None or not fix_from:
+            continue
+        idx = it.get("block")
+        if not isinstance(idx, int) or not (0 <= idx < len(texts)):
+            hits = [i for i, t in enumerate(texts) if t.count(fix_from) == 1]
+            if len(hits) == 1:
+                it["block"] = idx = hits[0]
+            else:
+                it["fix"] = None
+                it["fixFrom"] = None
+                it["fixUnavailable"] = True
+                continue
+
+        text = texts[idx]
+        # 删除类 fix（fix == ""，如乱码）：去掉首尾空白后按 pos 定位
+        if fix == "":
+            frm = fix_from.strip()
+            pos0 = it.get("pos")
+            if frm and isinstance(pos0, int):
+                at0 = pos0 - starts[idx]
+                if 0 <= at0 <= len(text) - len(frm) and text[at0:at0 + len(frm)] == frm:
+                    it["fixFrom"] = frm
+                    it["span"] = {"start": at0, "len": len(frm)}
+                    continue
+                hit = text.find(frm)
+                if hit >= 0:
+                    it["fixFrom"] = frm
+                    it["span"] = {"start": hit, "len": len(frm)}
+                    continue
+            it["fix"] = None
+            it["fixFrom"] = None
+            it["fixUnavailable"] = True
+            continue
+
+        # ① 块内唯一
+        if text.count(fix_from) == 1:
+            at = text.find(fix_from)
+            it["span"] = {"start": at, "len": len(fix_from)}
+            continue
+        # ② 用 pos 反算偏移
+        pos = it.get("pos")
+        if isinstance(pos, int):
+            at = pos - starts[idx]
+            if 0 <= at <= len(text) - len(fix_from) and text[at:at + len(fix_from)] == fix_from:
+                it["span"] = {"start": at, "len": len(fix_from)}
+                continue
+        # ③ 放弃
+        it["fix"] = None
+        it["fixFrom"] = None
+        it["fixUnavailable"] = True
+
+
 def _attach_blocks(issues: list[dict], html: str, plain: str) -> None:
     """
     给语病问题补 block（跳转目标）。
@@ -681,21 +792,47 @@ def analyze(html: str, genre: str | None = None, use_model: bool = False) -> dic
     # 用规则层 fix_text 处理 excerpt（片段窗口），只改动错字/的得地等，
     # 替换时整段窗口换回，周围文字不受影响。
     fix_failed: list[str] = []
-    for _it in issues:
-        if _it.get("fix"):
-            continue
-        excerpt = (_it.get("excerpt") or "").strip()
-        if not excerpt or len(excerpt) < 4:
-            continue
-        try:
-            fixed, notes = grammar.fix_text(excerpt)
-        except Exception:  # noqa: BLE001 规则层异常不应影响检查结果
-            fix_failed.append(excerpt[:12])
-            continue
-        if notes and fixed != excerpt:
-            _it["fix"] = fixed
-            _it["fixFrom"] = excerpt
+    _blocks = split_blocks(html)
+    _texts = [b.text for b in _blocks]
+    _starts: list[int] = []
+    _cur = 0
+    for _t in _texts:
+        _starts.append(_cur)
+        _cur += len(_t) + 1
 
+    for _it in issues:
+        if _it.get("fix") is not None:
+            continue
+        _bi, _pos = _it.get("block"), _it.get("pos")
+        if not isinstance(_bi, int) or not isinstance(_pos, int) or not (0 <= _bi < len(_texts)):
+            continue
+        _at = _pos - _starts[_bi]
+        _text = _texts[_bi]
+        if not (0 <= _at < len(_text)):
+            continue
+        _found = None
+        for _back, _fwd in ((2, 4), (6, 8), (10, 12)):
+            _ws = max(0, _at - _back)
+            _we = min(len(_text), _at + _fwd)
+            _win = _text[_ws:_we]
+            try:
+                _fixed, _notes = grammar.fix_text(_win)
+            except Exception:  # noqa: BLE001
+                break
+            if _notes and _fixed != _win:
+                _pair = _minimal_fix(_win, _fixed)
+                if _pair:
+                    _p1 = _win.find(_pair[0])
+                    if _p1 >= 0:
+                        _found = (_pair[0], _pair[1], _ws + _p1)
+                        break
+        if not _found:
+            continue
+        _it["fixFrom"], _it["fix"], _start_at = _found
+        _it["span"] = {"start": _start_at, "len": len(_it["fixFrom"])}
+
+    # 只保留能在同一块里唯一定位的 fix（否则前端会报「找不到原文片段」）
+    _verify_fix(issues, html)
 # 语病模块（grammar）的 issue 没有 rule 字段，这里统一补：
     # rule = 问题标题，ruleId = 去掉引号内容与数字后的稳定标识
     for _it in issues:

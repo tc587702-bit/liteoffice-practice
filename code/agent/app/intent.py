@@ -159,11 +159,39 @@ def _load() -> dict[str, Any]:
     return _cache
 
 
+# 关键词兜底：短句（「统计」「第2段」「哪里要改」）n-gram 证据不足，
+# 朴素贝叶斯容易判低或判偏（实测「这段话哪里要改」被判成 fact 0.396 → doc_search）。
+# 这里只放"说法足够明确"的模式，命中即定意图并给高置信；不命中才走贝叶斯。
+_KEYWORD_INTENT: tuple[tuple[str, str], ...] = (
+    (r"哪里.{0,4}(改|不对|问题|毛病)|怎么改|如何改|需要改|改得更|润色|优化", "improve"),
+    (r"标准|规范|依据|格式要求|范文|应该怎么写|写法是什么", "kb"),
+    (r"(多少|几)(个)?(字|页|段|表|标题|段落)|字数|表格数|共几", "stats"),
+    (r"第\s*[0-9一二三四五六七八九十百]+\s*(段|节|部分|章)", "section"),
+    (r"分(几|成几)|几个部分|大纲|框架|结构|讲了什么|讲了啥|概(要|括)", "structure"),
+)
+_KEYWORD_CONF = 0.95
+
+
+def _keyword_intent(query: str) -> tuple[str, float] | None:
+    import re as _re
+
+    for pattern, intent in _KEYWORD_INTENT:
+        if _re.search(pattern, query or ""):
+            return intent, _KEYWORD_CONF
+    return None
+
+
 def classify_intent(query: str) -> dict[str, Any]:
     """
     返回 {"intent": 最可能的意图, "confidence": 0~1, "scores": {意图: 概率}}
-    置信度低于 0.35 时调用方应回退到关键词规则。
+
+    顺序：先看关键词（说法明确时最可靠）→ 再走贝叶斯 n-gram。
+    置信度低于 0.35 时调用方应回退到关键词规则 / 交给模型选工具。
     """
+    kw = _keyword_intent(query)
+    if kw:
+        return {"intent": kw[0], "confidence": kw[1], "scores": {kw[0]: kw[1]}, "by": "keyword"}
+
     model = _load()
     grams = _grams(query)
     if not grams:

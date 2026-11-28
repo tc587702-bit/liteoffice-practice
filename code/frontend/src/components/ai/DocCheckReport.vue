@@ -260,20 +260,20 @@ function isRewriting(index: number) {
 }
 
 const STATUS_TONE: Record<string, string> = {
-  没问题: 'text-lo-success-text',
-  小问题: 'text-lo-text-3',
-  建议改进: 'text-lo-warning-text',
-  需返工: 'text-lo-danger-text',
+  没问题: 'text-[#30D158]',
+  小问题: 'text-[#A1A1A6]',
+  建议改进: 'text-[#FFB340]',
+  需返工: 'text-[#FF6961]',
 }
 
 const LEVEL_TONE: Record<string, string> = {
-  error: 'bg-[#FF453A]/15 text-lo-danger-text border-[#FF453A]/40',
-  warning: 'bg-[#FFB340]/15 text-lo-warning-text border-[#FFB340]/40',
-  info: 'bg-lo-fill-2 text-lo-text-3 border-lo-border',
+  error: 'bg-[#FF453A]/15 text-[#FF8A84] border-[#FF453A]/40',
+  warning: 'bg-[#FFB340]/15 text-[#FFC86B] border-[#FFB340]/40',
+  info: 'bg-white/[0.06] text-[#A1A1A6] border-white/10',
 }
 
 function tone(status: string) {
-  return STATUS_TONE[status] ?? 'text-lo-text-3'
+  return STATUS_TONE[status] ?? 'text-[#A1A1A6]'
 }
 
 function levelTone(level: string) {
@@ -307,39 +307,39 @@ onBeforeUnmount(() => window.removeEventListener('lo:issue-focus', onIssueFocus 
 
 <template>
   <div class="space-y-3">
-    <p class="text-[12.5px] leading-relaxed text-lo-text-1">{{ report.summary }}</p>
+    <p class="text-[12.5px] leading-relaxed text-[#D9D9DE]">{{ report.summary }}</p>
 
     <!-- 四个维度 -->
     <div class="grid grid-cols-2 gap-1.5">
       <div
         v-for="d in dims"
         :key="d.label"
-        class="rounded-[10px] border border-lo-border bg-lo-elevated-2 px-2.5 py-1.5"
+        class="rounded-[10px] border border-white/[0.08] bg-[#252527] px-2.5 py-1.5"
       >
         <div class="flex items-center justify-between">
-          <span class="text-[11.5px] text-lo-text-2">{{ d.label }}</span>
+          <span class="text-[11.5px] text-[#98989D]">{{ d.label }}</span>
           <span class="text-[11.5px] font-medium" :class="tone(d.status)">{{ d.status }}</span>
         </div>
-        <p v-if="d.count === 0" class="mt-0.5 text-[10.5px] text-lo-text-4">没有发现问题</p>
-        <p v-else class="mt-0.5 truncate text-[10.5px] text-lo-text-4">{{ d.problems[0] }}</p>
+        <p v-if="d.count === 0" class="mt-0.5 text-[10.5px] text-[#636366]">没有发现问题</p>
+        <p v-else class="mt-0.5 truncate text-[10.5px] text-[#636366]">{{ d.problems[0] }}</p>
       </div>
     </div>
 
     <!-- 问题清单 -->
     <div
       v-if="allClear"
-      class="rounded-[10px] border border-[#30D158]/30 bg-[#30D158]/[0.08] px-3 py-2 text-[12px] text-lo-success-text"
+      class="rounded-[10px] border border-[#30D158]/30 bg-[#30D158]/[0.08] px-3 py-2 text-[12px] text-[#7BE495]"
     >
       这一轮的问题都处理完了。想确认效果可以点「重新检查」。
     </div>
     <div v-if="report.issues.length && !allClear" class="space-y-2">
-      <p class="text-[11px] uppercase tracking-wide text-lo-text-4">改进建议（{{ report.issues.length }} 条）</p>
+      <p class="text-[11px] uppercase tracking-wide text-[#636366]">改进建议（{{ report.issues.length }} 条）</p>
       <div
         v-for="{ it, index: i } in mainIssues.filter(({ index }) => !isHidden(index) && !done.has(index))"
         :key="i"
         :data-badge="i + 1"
-        class="issue-card rounded-[10px] border border-lo-border bg-lo-elevated-2 px-3 py-2"
-        :class="it.block !== null ? 'cursor-pointer hover:border-lo-border-strong' : ''"
+        class="issue-card rounded-[10px] border border-white/[0.08] bg-[#252527] px-3 py-2"
+        :class="it.block !== null ? 'cursor-pointer hover:border-white/20' : ''"
         @click="onLocate(it.block, it.span, it.excerpt)"
       >
         <div class="flex items-start gap-2">
@@ -347,14 +347,14 @@ onBeforeUnmount(() => window.removeEventListener('lo:issue-focus', onIssueFocus 
             {{ it.levelLabel }}
           </span>
           <div class="min-w-0 flex-1">
-            <p class="text-[12.5px] font-medium text-lo-text-1">{{ it.problem }}</p>
-            <p class="mt-0.5 text-[11px] text-lo-text-4">{{ it.where }}</p>
-            <p class="mt-1 text-[11.5px] leading-relaxed text-lo-text-3">{{ it.why }}</p>
-            <p class="mt-1 text-[11.5px] leading-relaxed text-lo-accent-text">改法：{{ it.how }}</p>
+            <p class="text-[12.5px] font-medium text-[#F5F5F7]">{{ it.problem }}</p>
+            <p class="mt-0.5 text-[11px] text-[#636366]">{{ it.where }}</p>
+            <p class="mt-1 text-[11.5px] leading-relaxed text-[#A1A1A6]">{{ it.why }}</p>
+            <p class="mt-1 text-[11.5px] leading-relaxed text-[#6FB6FF]">改法：{{ it.how }}</p>
             <div class="mt-1 flex items-center gap-2">
               <span v-if="it.block !== null" class="text-[10.5px] text-[#0A84FF]">点击定位到该段</span>
               <button
-                v-if="it.fixFrom !== undefined && it.fix !== undefined && it.block !== null"
+                v-if="it.fixFrom != null && it.fix != null && it.block != null"
                 type="button"
                 class="rounded-full bg-[#0A84FF] px-2 py-0.5 text-[10.5px] font-medium text-white"
                 title="按建议直接改掉这一处"
@@ -365,7 +365,7 @@ onBeforeUnmount(() => window.removeEventListener('lo:issue-focus', onIssueFocus 
               <button
                 v-if="(it.fixFrom === undefined || it.fix === undefined) && it.block !== null"
                 type="button"
-                class="rounded-full border border-[#0A84FF]/50 px-2 py-0.5 text-[10.5px] text-lo-accent-text hover:bg-[#0A84FF]/15 disabled:opacity-50"
+                class="rounded-full border border-[#0A84FF]/50 px-2 py-0.5 text-[10.5px] text-[#6FB6FF] hover:bg-[#0A84FF]/15 disabled:opacity-50"
                 :disabled="isRewriting(i)"
                 title="交给模型重写这一句（过润色护栏，不会编造事实）"
                 @click.stop="applyRewrite(it, i)"
@@ -374,7 +374,7 @@ onBeforeUnmount(() => window.removeEventListener('lo:issue-focus', onIssueFocus 
               </button>
               <button
                 type="button"
-                class="rounded-full border border-lo-border px-2 py-0.5 text-[10.5px] text-lo-text-2 hover:text-lo-text-1"
+                class="rounded-full border border-white/[0.08] px-2 py-0.5 text-[10.5px] text-[#98989D] hover:text-[#F5F5F7]"
                 title="这条不是问题，以后不再提示"
                 @click.stop="dismissIssue(it, i)"
               >
@@ -384,7 +384,7 @@ onBeforeUnmount(() => window.removeEventListener('lo:issue-focus', onIssueFocus 
             <p
               v-if="statusOf(i)"
               class="mt-1 text-[10.5px] leading-relaxed"
-              :class="statusOf(i)!.ok ? 'text-lo-success-text' : 'text-lo-warning-text'"
+              :class="statusOf(i)!.ok ? 'text-[#7BE495]' : 'text-[#FFB340]'"
             >
               {{ statusOf(i)!.message }}
             </p>
@@ -392,13 +392,13 @@ onBeforeUnmount(() => window.removeEventListener('lo:issue-focus', onIssueFocus 
         </div>
       </div>
     </div>
-    <p v-else class="text-[12px] text-lo-success-text">没有发现需要修改的地方。</p>
+    <p v-else class="text-[12px] text-[#30D158]">没有发现需要修改的地方。</p>
 
     <!-- 可选建议：默认折叠，避免首屏噪音 -->
     <div v-if="optionalIssues.length" class="mt-1">
       <button
         type="button"
-        class="flex w-full items-center justify-between rounded-[10px] border border-lo-border px-3 py-2 text-[11.5px] text-lo-text-2 hover:text-lo-text-1"
+        class="flex w-full items-center justify-between rounded-[10px] border border-white/[0.08] px-3 py-2 text-[11.5px] text-[#98989D] hover:text-[#F5F5F7]"
         @click="showOptional = !showOptional"
       >
         <span>另有 {{ remainingOptional }} 条可选建议（不影响可用性）</span>
@@ -409,8 +409,8 @@ onBeforeUnmount(() => window.removeEventListener('lo:issue-focus', onIssueFocus 
           v-for="{ it, index: i } in optionalIssues.filter(({ index }) => !isHidden(index) && !done.has(index))"
           :key="i"
           :data-badge="i + 1"
-          class="issue-card rounded-[10px] border border-lo-border px-3 py-2"
-          :class="it.block !== null ? 'cursor-pointer hover:border-lo-border-strong' : ''"
+          class="issue-card rounded-[10px] border border-white/[0.08] px-3 py-2"
+          :class="it.block !== null ? 'cursor-pointer hover:border-white/20' : ''"
           @click="onLocate(it.block, it.span, it.excerpt)"
         >
           <div class="flex items-start gap-2">
@@ -418,10 +418,10 @@ onBeforeUnmount(() => window.removeEventListener('lo:issue-focus', onIssueFocus 
               {{ it.levelLabel }}
             </span>
             <div class="min-w-0 flex-1">
-              <p class="text-[12.5px] font-medium text-lo-text-1">{{ it.problem }}</p>
-              <p class="mt-0.5 text-[11px] text-lo-text-4">{{ it.where }}</p>
-              <p class="mt-1 text-[11.5px] leading-relaxed text-lo-text-3">{{ it.why }}</p>
-              <p class="mt-1 text-[11.5px] leading-relaxed text-lo-accent-text">改法：{{ it.how }}</p>
+              <p class="text-[12.5px] font-medium text-[#F5F5F7]">{{ it.problem }}</p>
+              <p class="mt-0.5 text-[11px] text-[#636366]">{{ it.where }}</p>
+              <p class="mt-1 text-[11.5px] leading-relaxed text-[#A1A1A6]">{{ it.why }}</p>
+              <p class="mt-1 text-[11.5px] leading-relaxed text-[#6FB6FF]">改法：{{ it.how }}</p>
               <button
                 v-if="it.fixFrom !== undefined && it.fix !== undefined && it.block !== null"
                 type="button"
@@ -432,7 +432,7 @@ onBeforeUnmount(() => window.removeEventListener('lo:issue-focus', onIssueFocus 
               </button>
               <button
                 type="button"
-                class="mt-1 rounded-full border border-lo-border px-2 py-0.5 text-[10.5px] text-lo-text-2 hover:text-lo-text-1"
+                class="mt-1 rounded-full border border-white/[0.08] px-2 py-0.5 text-[10.5px] text-[#98989D] hover:text-[#F5F5F7]"
                 @click.stop="dismissIssue(it, i)"
               >
                 不用改
