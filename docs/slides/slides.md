@@ -342,7 +342,7 @@ components（只消费状态与回调）
 
 > 总原则：**规则做确定的事，模型做理解的事；模型输出先过护栏再进文档。**
 > 五个部件：编排 · 工具 · 记忆 · 护栏 · 知识库。
-> 代码位置：`code/agent/app/graph.py`（编排）· `tools.py`（工具）· `polish_guard.py`（护栏）· `embed.py`（检索）· `feedback.py`（记忆）· `code/agent/data/kb.db`（知识库）。
+> 代码位置：`code/agent/app/arrange.py`（编排）· `tools.py`（工具）· `polish_guard.py`（护栏）· `embeding.py`（检索）· `memory.py`（记忆）· `code/agent/data/kb.db`（知识库）。
 
 ---
 
