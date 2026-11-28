@@ -277,12 +277,7 @@ td {
 
 | 服务 | 方法 | 路径 | 作用 |
 | --- | --- | --- | --- |
-| 协作 | POST | `/api/docs` | 上传文档（HTML 先消毒） |
-| 协作 | GET | `/api/docs` / `/api/docs/:id` | 文档列表 / 取单篇 |
-| 协作 | POST | `/api/docs/:id/share` | 生成分享链接 |
-| 协作 | POST | `/api/docs/:id/save` | 覆盖保存 HTML |
-| 协作 | GET/POST | `/api/share/:token` / `/revoke` | 取内容 / 撤销 |
-| 协作 | WS | `/ws?token=...` | 在线状态 + Yjs 增量转发 |
+
 | AI | POST | `/v1/agent/run` | LangGraph 编排 |
 | AI | POST | `/v1/chat` | 纯对话，无工具 |
 | AI | POST | `/v1/kb/{kb_id}/search` | BM25 检索（问答出口） |
