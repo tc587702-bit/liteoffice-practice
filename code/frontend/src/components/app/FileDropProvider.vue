@@ -93,7 +93,7 @@ onBeforeUnmount(() => {
   <slot />
   <div
     :aria-hidden="!dragging"
-    class="pointer-events-none fixed inset-0 z-40 flex items-center justify-center bg-black/70 backdrop-blur-[2px] transition-opacity duration-200"
+    class="pointer-events-none fixed inset-0 z-40 flex items-center justify-center bg-lo-scrim backdrop-blur-[2px] transition-opacity duration-200"
     :class="dragging ? 'opacity-100' : 'opacity-0'"
   >
     <div
@@ -105,8 +105,8 @@ onBeforeUnmount(() => {
       >
         <AppIcon name="file-up" class="h-7 w-7 text-[#0A84FF]" :stroke-width="1.6" />
       </span>
-      <p class="text-[17px] font-medium text-[#F5F5F7]">松手即可在本地打开</p>
-      <p class="text-[12.5px] text-[#A1A1A6]">docx · xlsx · pptx · md · pdf，文件不会离开这台设备</p>
+      <p class="text-[17px] font-medium text-lo-text-1">松手即可在本地打开</p>
+      <p class="text-[12.5px] text-lo-text-3">docx · xlsx · pptx · md · pdf，文件不会离开这台设备</p>
     </div>
   </div>
 </template>

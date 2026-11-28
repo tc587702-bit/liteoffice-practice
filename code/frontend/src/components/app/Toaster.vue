@@ -31,10 +31,10 @@ const ICONS: Record<string, IconName> = {
 }
 
 const TONES: Record<string, string> = {
-  info: 'text-[#6FB6FF]',
-  success: 'text-[#5CE07E]',
-  warning: 'text-[#FFB340]',
-  error: 'text-[#FF6961]',
+  info: 'text-lo-accent-text',
+  success: 'text-lo-success-text',
+  warning: 'text-lo-warning-text',
+  error: 'text-lo-danger-text',
 }
 </script>
 
@@ -47,19 +47,19 @@ const TONES: Record<string, string> = {
       v-for="toast in toasts"
       :key="toast.id"
       role="status"
-      class="lo-rise pointer-events-auto flex items-start gap-3 rounded-[18px] border border-white/[0.08] bg-[#2C2C2E]/95 p-3.5 shadow-[0_18px_40px_-16px_rgba(0,0,0,0.8)] backdrop-blur-xl"
+      class="lo-rise pointer-events-auto flex items-start gap-3 rounded-[18px] border border-lo-border bg-lo-elevated p-3.5 shadow-[0_18px_40px_-16px_rgba(0,0,0,0.8)] backdrop-blur-xl"
     >
       <AppIcon :name="ICONS[toast.tone]" class="mt-0.5 h-4 w-4 shrink-0" :class="TONES[toast.tone]" :stroke-width="2" />
       <div class="min-w-0 flex-1">
-        <p class="text-[13px] font-medium leading-snug text-[#F5F5F7]">{{ toast.title }}</p>
-        <p v-if="toast.description" class="mt-0.5 break-words text-[12px] leading-relaxed text-[#A1A1A6]">
+        <p class="text-[13px] font-medium leading-snug text-lo-text-1">{{ toast.title }}</p>
+        <p v-if="toast.description" class="mt-0.5 break-words text-[12px] leading-relaxed text-lo-text-3">
           {{ toast.description }}
         </p>
       </div>
       <button
         type="button"
         aria-label="关闭提示"
-        class="rounded-md p-0.5 text-[#636366] transition-colors hover:text-white"
+        class="rounded-md p-0.5 text-lo-text-4 transition-colors hover:text-lo-text-1"
         @click="store.dismissToast(toast.id)"
       >
         <AppIcon name="x" class="h-3.5 w-3.5" />

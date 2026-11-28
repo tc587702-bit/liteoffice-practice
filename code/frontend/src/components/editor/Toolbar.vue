@@ -103,12 +103,12 @@ function onMouseDown(event: MouseEvent) {
 </script>
 
 <template>
-  <div class="flex flex-wrap items-center gap-1 border-b border-white/[0.06] bg-[#242426] px-3 py-2">
+  <div class="flex flex-wrap items-center gap-1 border-b border-lo-border-soft bg-lo-elevated-2 px-3 py-2">
     <!-- 字体 -->
     <select
       :disabled="disabled"
       title="字体"
-      class="h-8 w-[118px] rounded-lg border border-white/[0.08] bg-[#1F1F21] px-2 text-[12px] text-[#F5F5F7] outline-none disabled:opacity-30"
+      class="h-8 w-[118px] rounded-lg border border-lo-border bg-lo-surface-3 px-2 text-[12px] text-lo-text-1 outline-none disabled:opacity-30"
       @change="emit('command', 'font:' + ($event.target as HTMLSelectElement).value); resetSelect($event)"
     >
       <option value="" disabled selected>字体</option>
@@ -119,7 +119,7 @@ function onMouseDown(event: MouseEvent) {
     <select
       :disabled="disabled"
       title="字号"
-      class="h-8 w-[104px] rounded-lg border border-white/[0.08] bg-[#1F1F21] px-2 text-[12px] text-[#F5F5F7] outline-none disabled:opacity-30"
+      class="h-8 w-[104px] rounded-lg border border-lo-border bg-lo-surface-3 px-2 text-[12px] text-lo-text-1 outline-none disabled:opacity-30"
       @change="emit('command', 'size:' + ($event.target as HTMLSelectElement).value); resetSelect($event)"
     >
       <option value="" disabled selected>字号</option>
@@ -129,20 +129,20 @@ function onMouseDown(event: MouseEvent) {
     <span class="lo-divider mx-1 h-5 w-px" />
 
     <!-- 文字色：色板 + 自定义取色器 -->
-    <div class="flex h-8 items-center gap-1 rounded-lg bg-[#1F1F21] px-1.5" title="文字颜色">
-      <span class="text-[13px] font-semibold text-[#C7C7CC]">A</span>
+    <div class="flex h-8 items-center gap-1 rounded-lg bg-lo-surface-3 px-1.5" title="文字颜色">
+      <span class="text-[13px] font-semibold text-lo-text-5">A</span>
       <button
         v-for="c in TEXT_COLORS"
         :key="c"
         type="button"
         :disabled="disabled"
-        class="h-5 w-5 rounded border border-white/20 hover:scale-110"
+        class="h-5 w-5 rounded border border-lo-border-strong hover:scale-110"
         :style="{ background: c }"
         :title="`文字色 ${c}`"
         @mousedown="onMouseDown"
         @click="emit('command', 'color:' + c)"
       />
-      <label class="relative flex h-5 w-5 cursor-pointer items-center justify-center rounded border border-white/20 text-[11px] text-[#98989D] hover:text-white" title="自定义文字颜色">
+      <label class="relative flex h-5 w-5 cursor-pointer items-center justify-center rounded border border-lo-border-strong text-[11px] text-lo-text-2 hover:text-lo-text-1" title="自定义文字颜色">
         ＋
         <input
           type="color"
@@ -154,14 +154,14 @@ function onMouseDown(event: MouseEvent) {
     </div>
 
     <!-- 文本底色 -->
-    <div class="flex h-8 items-center gap-1 rounded-lg bg-[#1F1F21] px-1.5" title="文本底色">
-      <span class="h-3.5 w-3.5 rounded-sm border border-white/20 bg-[#ffff00]" />
+    <div class="flex h-8 items-center gap-1 rounded-lg bg-lo-surface-3 px-1.5" title="文本底色">
+      <span class="h-3.5 w-3.5 rounded-sm border border-lo-border-strong bg-[#ffff00]" />
       <button
         v-for="c in HL_COLORS"
         :key="c"
         type="button"
         :disabled="disabled"
-        class="h-5 w-5 rounded border border-white/20 hover:scale-110"
+        class="h-5 w-5 rounded border border-lo-border-strong hover:scale-110"
         :style="{ background: c }"
         :title="`底色 ${c}`"
         @mousedown="onMouseDown"
@@ -183,8 +183,8 @@ function onMouseDown(event: MouseEvent) {
         class="flex h-8 min-w-8 items-center justify-center gap-1 rounded-lg px-2 text-[12px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[#0A84FF]/60 disabled:cursor-not-allowed disabled:opacity-30"
         :class="
           props.active[tool.key]
-            ? 'bg-[#0A84FF]/20 text-[#6FB6FF]'
-            : 'text-[#C7C7CC] hover:bg-white/[0.08] hover:text-white'
+            ? 'bg-[#0A84FF]/20 text-lo-accent-text'
+            : 'text-lo-text-5 hover:bg-lo-fill-3 hover:text-lo-text-1'
         "
         @mousedown="onMouseDown"
         @click="emit('command', tool.key)"

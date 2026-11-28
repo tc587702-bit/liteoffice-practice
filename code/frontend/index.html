@@ -6,6 +6,19 @@
     <meta name="description" content="LiteOffice · 文件不上传 · 浏览器内编辑" />
     <meta name="theme-color" content="#000000" />
     <title>LiteOffice · 文件不上传 · 浏览器内编辑</title>
+    <script>
+      /* 首屏防闪烁：在 CSS/JS 加载前就把主题写到 <html> 上 */
+      ;(function () {
+        try {
+          var saved = localStorage.getItem('liteoffice-theme')
+          var theme = saved === 'light' || saved === 'dark' ? saved : 'dark'
+          document.documentElement.dataset.theme = theme
+          document.documentElement.style.colorScheme = theme
+          var meta = document.querySelector('meta[name="theme-color"]')
+          if (meta) meta.setAttribute('content', theme === 'light' ? '#f5f5f7' : '#000000')
+        } catch (_) {}
+      })()
+    </script>
   </head>
   <body>
     <div id="app"></div>

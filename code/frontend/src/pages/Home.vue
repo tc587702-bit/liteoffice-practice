@@ -69,15 +69,6 @@ async function handleSave() {
   }
 }
 
-/* AI 助手 / 云端工作区均为预留位：只弹 Toast，不改变选中态 */
-function handleReserved() {
-  store.addToast({
-    title: '云端工作区正在开发中，目前请使用本地安全模式',
-    description: '本地文档仍保持选中，文件不会上传到任何服务器',
-    tone: 'info',
-  })
-}
-
 function openDoc(id: string) {
   store.setActive(id)
   void router.push('/editor')
@@ -85,25 +76,25 @@ function openDoc(id: string) {
 </script>
 
 <template>
-  <div class="flex h-full min-h-0 flex-col overflow-hidden text-[#F5F5F7]">
+  <div class="flex h-full min-h-0 flex-col overflow-hidden text-lo-text-1">
     <TopBar :saving="saving" @save="handleSave" />
 
     <div class="flex min-h-0 flex-1">
-      <Sidebar :active-id="activeDoc?.id ?? null" variant="home" @select="openDoc" @remove="(id) => void store.removeDoc(id)" @reserved="handleReserved" />
+      <Sidebar :active-id="activeDoc?.id ?? null" variant="home" @select="openDoc" @remove="(id) => void store.removeDoc(id)" />
 
       <main class="thin-scroll min-w-0 flex-1 overflow-y-auto px-6 pb-12 pt-8 lg:px-10">
         <div class="mx-auto flex w-full max-w-[1120px] flex-col gap-4">
           <div class="lo-rise lo-delay-1 flex items-center justify-between gap-3">
-            <div class="flex items-center gap-2 text-[12px] text-[#636366]">
-              <AppIcon name="shield-check" class="h-3.5 w-3.5 text-[#30D158]" />
+            <div class="flex items-center gap-2 text-[12px] text-lo-text-4">
+              <AppIcon name="shield-check" class="h-3.5 w-3.5 text-lo-success-text" />
               本地安全模式
-              <span class="h-1 w-1 rounded-full bg-[#3A3A3C]" />
+              <span class="h-1 w-1 rounded-full bg-lo-surface-4" />
               当前会话：
-              <span class="tabular-nums text-[#A1A1A6]">
+              <span class="tabular-nums text-lo-text-3">
                 {{ loading ? '加载中' : docs.length ? `${docs.length} 个文件` : '暂无文件' }}
               </span>
             </div>
-            <div class="flex items-center gap-2 text-[12px] text-[#636366]">
+            <div class="flex items-center gap-2 text-[12px] text-lo-text-4">
               <AppIcon name="hard-drive" class="h-3.5 w-3.5" />
               {{ persistence === 'degraded' ? '存储降级：仅当前页面' : 'IndexedDB 已启用' }}
             </div>
@@ -124,11 +115,11 @@ function openDoc(id: string) {
             />
             <div class="relative grid gap-6 p-6 lg:grid-cols-[3fr_2fr] lg:p-8">
               <div class="flex min-w-0 flex-col">
-                <p class="text-[12px] font-medium tracking-[0.16em] text-[#98989D]">LOCAL-FIRST WORKSPACE</p>
-                <h1 class="mt-3 text-[34px] font-semibold leading-[1.15] tracking-tight text-[#F5F5F7] md:text-[40px]">
+                <p class="text-[12px] font-medium tracking-[0.16em] text-lo-text-2">LOCAL-FIRST WORKSPACE</p>
+                <h1 class="mt-3 text-[34px] font-semibold leading-[1.15] tracking-tight text-lo-text-1 md:text-[40px]">
                   打开一个文档
                 </h1>
-                <p class="mt-3 text-[14.5px] leading-relaxed text-[#98989D] md:mt-4">
+                <p class="mt-3 text-[14.5px] leading-relaxed text-lo-text-2 md:mt-4">
                   拖进窗口，或点顶部「打开文件」
                 </p>
 
@@ -144,14 +135,14 @@ function openDoc(id: string) {
                   <span
                     v-for="format in FORMAT_PILLS"
                     :key="format"
-                    class="rounded-[8px] bg-[rgba(255,255,255,0.06)] px-[8px] py-[4px] text-[12px] font-medium leading-none text-[#A1A1A6]"
+                    class="rounded-[8px] bg-lo-fill-2 px-[8px] py-[4px] text-[12px] font-medium leading-none text-lo-text-3"
                   >
                     {{ format }}
                   </span>
                 </div>
 
-                <div class="mt-auto hidden items-center gap-2 pt-6 text-[12px] text-[#636366] md:flex">
-                  <AppIcon name="lock" class="h-3.5 w-3.5 text-[#30D158]" />
+                <div class="mt-auto hidden items-center gap-2 pt-6 text-[12px] text-lo-text-4 md:flex">
+                  <AppIcon name="lock" class="h-3.5 w-3.5 text-lo-success-text" />
                   解析、渲染与导出全部在本机完成
                 </div>
               </div>
@@ -163,7 +154,7 @@ function openDoc(id: string) {
                 :class="
                   dropHover
                     ? 'lo-drag-breathe border-solid border-[#0A84FF]'
-                    : 'border-white/[0.12] bg-white/[0.012] hover:border-white/20 hover:bg-white/[0.03]'
+                    : 'border-lo-border-strong bg-lo-fill-1 hover:border-lo-border-strong hover:bg-lo-fill-2'
                 "
                 @click="openPicker"
                 @dragenter="dropHover = true"
@@ -181,14 +172,14 @@ function openDoc(id: string) {
                   <AppIcon name="upload-cloud" class="h-7 w-7 text-[#0A84FF]" :stroke-width="1.6" />
                   <span class="lo-ring-spin absolute -inset-2 rounded-[22px] border border-dashed border-[#0A84FF]/25" />
                 </span>
-                <span class="relative mt-4 text-[14px] font-medium text-[#F5F5F7]">
+                <span class="relative mt-4 text-[14px] font-medium text-lo-text-1">
                   {{ dropHover ? '松手即可打开' : '或拖入文件' }}
                 </span>
-                <span class="relative mt-1.5 max-w-[248px] text-[12px] leading-relaxed text-[#636366]">
+                <span class="relative mt-1.5 max-w-[248px] text-[12px] leading-relaxed text-lo-text-4">
                   {{ busy ? '正在本地解析，文件不会离开这台设备' : '支持多文件同时导入，切换后内容互不影响' }}
                 </span>
                 <span
-                  class="relative mt-4 inline-flex items-center gap-1.5 rounded-lg bg-white/[0.06] px-2 py-1 text-[11px] text-[#A1A1A6]"
+                  class="relative mt-4 inline-flex items-center gap-1.5 rounded-lg bg-lo-fill-2 px-2 py-1 text-[11px] text-lo-text-3"
                 >
                   <AppIcon name="gauge" class="h-3 w-3" :stroke-width="2" />
                   不限制文件大小 · 不截断内容
@@ -204,18 +195,18 @@ function openDoc(id: string) {
               :key="item.key"
               class="lo-card lo-hover-lift flex min-w-0 items-center gap-3 px-4 py-4"
             >
-              <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white/[0.06]">
-                <AppIcon :name="item.icon" class="h-4 w-4 text-[#C7C7CC]" />
+              <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-lo-fill-2">
+                <AppIcon :name="item.icon" class="h-4 w-4 text-lo-text-5" />
               </span>
               <span class="min-w-0">
                 <span v-if="item.key === 'upload'" class="flex items-baseline gap-1 whitespace-nowrap">
-                  <span class="text-[24px] font-semibold leading-none text-[#F5F5F7]">
+                  <span class="text-[24px] font-semibold leading-none text-lo-text-1">
                     <SlotNumber :value="uploadCount" />
                   </span>
-                  <span class="text-[14px] text-[#A1A1A6]">次上传</span>
+                  <span class="text-[14px] text-lo-text-3">次上传</span>
                 </span>
-                <span v-else class="block whitespace-nowrap text-[14px] font-medium leading-tight text-[#F5F5F7]">{{ item.title }}</span>
-                <span class="mt-1 block truncate text-[11.5px] text-[#98989D]" :title="item.caption">
+                <span v-else class="block whitespace-nowrap text-[14px] font-medium leading-tight text-lo-text-1">{{ item.title }}</span>
+                <span class="mt-1 block truncate text-[11.5px] text-lo-text-2" :title="item.caption">
                   {{ item.caption }}
                 </span>
               </span>
@@ -226,8 +217,8 @@ function openDoc(id: string) {
           <section v-if="docs.length > 0" class="lo-card lo-rise lo-delay-4 p-6">
             <div class="flex items-center justify-between gap-3">
               <div>
-                <h2 class="text-[14px] font-semibold text-[#F5F5F7]">当前会话</h2>
-                <p class="mt-1 text-[12px] text-[#98989D]">
+                <h2 class="text-[14px] font-semibold text-lo-text-1">当前会话</h2>
+                <p class="mt-1 text-[12px] text-lo-text-2">
                   共 {{ docs.length }} 个文件，均为本机读取，可直接进入编辑
                 </p>
               </div>
@@ -237,34 +228,34 @@ function openDoc(id: string) {
               <li v-for="doc in docs" :key="doc.id">
                 <button
                   type="button"
-                  class="flex w-full items-center gap-3 rounded-[16px] border border-white/[0.06] bg-[#262628] px-3 py-2.5 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-white/15"
+                  class="flex w-full items-center gap-3 rounded-[16px] border border-lo-border-soft bg-lo-surface-2 px-3 py-2.5 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-lo-border-strong"
                   @click="openDoc(doc.id)"
                 >
                   <span
-                    class="flex h-8 w-10 shrink-0 items-center justify-center rounded-md bg-white/[0.07] text-[9px] font-bold tracking-wide text-[#C7C7CC]"
+                    class="flex h-8 w-10 shrink-0 items-center justify-center rounded-md bg-lo-fill-2 text-[9px] font-bold tracking-wide text-lo-text-5"
                   >
                     {{ KIND_EXT[doc.kind] }}
                   </span>
                   <span class="min-w-0 flex-1">
-                    <span class="block truncate text-[13px] text-[#F5F5F7]" :title="doc.name">{{ doc.name }}</span>
-                    <span class="mt-0.5 block text-[11px] tabular-nums text-[#636366]">
+                    <span class="block truncate text-[13px] text-lo-text-1" :title="doc.name">{{ doc.name }}</span>
+                    <span class="mt-0.5 block text-[11px] tabular-nums text-lo-text-4">
                       {{ formatSize(doc.size) }}
                       <template v-if="doc.warnings.length"> · {{ doc.warnings[0] }}</template>
                     </span>
                   </span>
-                  <AppIcon name="arrow-up-right" class="h-4 w-4 shrink-0 text-[#636366]" />
+                  <AppIcon name="arrow-up-right" class="h-4 w-4 shrink-0 text-lo-text-4" />
                 </button>
               </li>
             </ul>
           </section>
 
           <div v-else class="lo-card lo-rise lo-delay-4 flex items-center gap-3 px-6 py-4">
-            <span class="flex h-9 w-9 items-center justify-center rounded-xl bg-white/[0.06]">
-              <AppIcon name="file-text" class="h-4 w-4 text-[#636366]" />
+            <span class="flex h-9 w-9 items-center justify-center rounded-xl bg-lo-fill-2">
+              <AppIcon name="file-text" class="h-4 w-4 text-lo-text-4" />
             </span>
             <div class="min-w-0">
-              <p class="text-[13px] font-medium text-[#F5F5F7]">还没有打开文件</p>
-              <p class="mt-0.5 text-[12px] text-[#636366]">
+              <p class="text-[13px] font-medium text-lo-text-1">还没有打开文件</p>
+              <p class="mt-0.5 text-[12px] text-lo-text-4">
                 支持 docx / xlsx / pptx / md / pdf，导入后会自动出现在左侧会话列表
               </p>
             </div>

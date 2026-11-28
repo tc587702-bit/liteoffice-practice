@@ -60,16 +60,16 @@ function onKeydown(e: KeyboardEvent) {
 </script>
 
 <template>
-  <div class="flex h-full min-h-[320px] flex-col overflow-hidden rounded-[10px] bg-[#141416]">
-    <div class="flex items-center justify-between border-b border-white/[0.06] px-3 py-1.5">
-      <span class="text-[11px] text-[#98989D]">Markdown 源码{{ docName ? ` · ${docName}` : '' }}</span>
-      <span class="text-[10.5px] text-[#636366]">
+  <div class="flex h-full min-h-[320px] flex-col overflow-hidden rounded-[10px] bg-lo-code">
+    <div class="flex items-center justify-between border-b border-lo-border-soft px-3 py-1.5">
+      <span class="text-[11px] text-lo-text-2">Markdown 源码{{ docName ? ` · ${docName}` : '' }}</span>
+      <span class="text-[10.5px] text-lo-text-4">
         {{ lines }} 行 · {{ chars }} 字符<template v-if="dirty"> · 未同步</template>
       </span>
     </div>
     <textarea
       ref="area"
-      class="lo-md-source thin-scroll flex-1 resize-none bg-transparent px-4 py-3 font-mono text-[12.5px] leading-[1.75] text-[#F5F5F7] outline-none"
+      class="lo-md-source thin-scroll flex-1 resize-none bg-transparent px-4 py-3 font-mono text-[12.5px] leading-[1.75] text-lo-text-1 outline-none"
       spellcheck="false"
       :value="text"
       @input="onInput"

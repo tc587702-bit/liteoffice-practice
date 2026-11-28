@@ -105,7 +105,7 @@ function loadedLabel(target: PersistedSheet) {
 </script>
 
 <template>
-  <div v-if="!sheet" class="lo-card p-6 text-[13px] text-[#A1A1A6]">暂无工作表内容。</div>
+  <div v-if="!sheet" class="lo-card p-6 text-[13px] text-lo-text-3">暂无工作表内容。</div>
   <div v-else class="flex min-h-0 flex-1 flex-col gap-3 p-4">
     <div class="flex flex-wrap items-center justify-between gap-3">
       <div class="flex flex-wrap items-center gap-1">
@@ -116,8 +116,8 @@ function loadedLabel(target: PersistedSheet) {
           class="rounded-lg px-3 py-1.5 text-[12.5px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[#0A84FF]/60"
           :class="
             index === activeSheet
-              ? 'bg-white/[0.1] font-medium text-white'
-              : 'text-[#A1A1A6] hover:bg-white/[0.05] hover:text-white'
+              ? 'bg-lo-fill-3 font-medium text-lo-text-1'
+              : 'text-lo-text-3 hover:bg-lo-fill-2 hover:text-lo-text-1'
           "
           @click="activeSheet = index"
         >
@@ -126,33 +126,33 @@ function loadedLabel(target: PersistedSheet) {
       </div>
       <div class="flex items-center gap-2">
         <input v-model="query" placeholder="筛选单元格内容" class="lo-input h-8 w-44 px-2.5 text-[12px]" />
-        <span class="text-[11.5px] tabular-nums text-[#636366]">
+        <span class="text-[11.5px] tabular-nums text-lo-text-4">
           {{ rows.length }} / {{ sheet.totalRows }} 行 · {{ sheet.totalCols }} 列
         </span>
       </div>
     </div>
 
-    <p class="flex flex-wrap items-center gap-1.5 text-[11.5px] text-[#98989D]">
-      <AppIcon name="table-2" class="h-3.5 w-3.5 shrink-0 text-[#30D158]" />
+    <p class="flex flex-wrap items-center gap-1.5 text-[11.5px] text-lo-text-2">
+      <AppIcon name="table-2" class="h-3.5 w-3.5 shrink-0 text-lo-success-text" />
       <span class="tabular-nums">{{ loadedLabel(sheet) }}</span>
-      <span class="text-[#636366]">· 全部行都在内存中，滚动不会丢失内容</span>
+      <span class="text-lo-text-4">· 全部行都在内存中，滚动不会丢失内容</span>
     </p>
 
     <div
       ref="scrollRef"
-      class="thin-scroll min-h-0 flex-1 overflow-auto rounded-xl border border-white/[0.07] bg-white"
+      class="thin-scroll min-h-0 flex-1 overflow-auto rounded-xl border border-lo-border-soft bg-white"
       @scroll.passive="onScroll"
     >
       <table class="w-max min-w-full border-collapse text-[12.5px] text-[#1D1D1F]">
         <thead class="sticky top-0 z-10">
           <tr>
             <th
-              class="sticky left-0 z-20 w-12 border-b border-r border-[#E5E5EA] bg-[#F2F2F7] px-2 py-1.5 text-[11px] font-medium text-[#98989D]"
+              class="sticky left-0 z-20 w-12 border-b border-r border-[#E5E5EA] bg-[#F2F2F7] px-2 py-1.5 text-[11px] font-medium text-lo-text-2"
             />
             <th
               v-for="index in width"
               :key="index"
-              class="min-w-[110px] border-b border-r border-[#E5E5EA] bg-[#F2F2F7] px-2 py-1.5 text-left text-[11px] font-semibold text-[#636366]"
+              class="min-w-[110px] border-b border-r border-[#E5E5EA] bg-[#F2F2F7] px-2 py-1.5 text-left text-[11px] font-semibold text-lo-text-4"
             >
               {{ sheet.columns[index - 1] ?? '' }}
             </th>
@@ -169,7 +169,7 @@ function loadedLabel(target: PersistedSheet) {
             :style="{ height: `${ROW_HEIGHT}px` }"
           >
             <th
-              class="sticky left-0 z-10 border-b border-r border-[#EDEDF0] bg-[#F7F7FA] px-2 py-1 text-[10.5px] font-normal tabular-nums text-[#98989D]"
+              class="sticky left-0 z-10 border-b border-r border-[#EDEDF0] bg-[#F7F7FA] px-2 py-1 text-[10.5px] font-normal tabular-nums text-lo-text-2"
             >
               {{ entry.row.r }}
             </th>
@@ -188,7 +188,7 @@ function loadedLabel(target: PersistedSheet) {
         </tbody>
       </table>
     </div>
-    <p class="text-[11px] text-[#636366]">
+    <p class="text-[11px] text-lo-text-4">
       当前 DOM 渲染 {{ visibleRows.length }} 行（可视区 ±{{ OVERSCAN }} 行），共 {{ rows.length.toLocaleString('en-US') }}
       行 × {{ width }} 列；全部单元格都在内存中，可滚动到达最后一行
     </p>

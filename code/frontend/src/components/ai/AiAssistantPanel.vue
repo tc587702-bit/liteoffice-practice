@@ -533,21 +533,21 @@ watch(aiPanelOpen, (open) => {
     <section
       v-if="aiPanelOpen"
       aria-label="AI 助手"
-      class="lo-glass lo-glass-strong z-30 flex h-full w-[360px] shrink-0 flex-col overflow-hidden border-l border-white/[0.06]"
+      class="lo-glass lo-glass-strong z-30 flex h-full w-[360px] shrink-0 flex-col overflow-hidden border-l border-lo-border-soft"
     >
-      <header class="flex shrink-0 items-center gap-2 border-b border-white/[0.06] px-4 py-3">
+      <header class="flex shrink-0 items-center gap-2 border-b border-lo-border-soft px-4 py-3">
         <span class="flex h-7 w-7 items-center justify-center rounded-[9px] bg-[#0A84FF]/15">
           <AppIcon name="sparkles" class="h-4 w-4 text-[#0A84FF]" :stroke-width="1.8" />
         </span>
         <div class="min-w-0 flex-1">
-          <p class="truncate text-[13px] font-semibold text-[#F5F5F7]">AI 助手</p>
-          <p class="truncate text-[11px] text-[#636366]">
+          <p class="truncate text-[13px] font-semibold text-lo-text-1">AI 助手</p>
+          <p class="truncate text-[11px] text-lo-text-4">
             {{ activeDoc ? `当前文档：${activeDoc.name}` : '还没有打开文档' }}
           </p>
         </div>
         <button
           type="button"
-          class="rounded-full border border-white/[0.08] px-2 py-1 text-[11px] text-[#A1A1A6] transition-colors hover:bg-white/[0.06] hover:text-[#F5F5F7] disabled:opacity-40"
+          class="rounded-full border border-lo-border px-2 py-1 text-[11px] text-lo-text-3 transition-colors hover:bg-lo-fill-2 hover:text-lo-text-1 disabled:opacity-40"
           :disabled="!activeDoc || checking"
           @click="checkDoc()"
         >
@@ -556,7 +556,7 @@ watch(aiPanelOpen, (open) => {
         <button
           v-if="marked > 0"
           type="button"
-          class="rounded-full border border-white/[0.08] px-2 py-1 text-[11px] text-[#98989D] transition-colors hover:bg-white/[0.06] hover:text-[#F5F5F7]"
+          class="rounded-full border border-lo-border px-2 py-1 text-[11px] text-lo-text-2 transition-colors hover:bg-lo-fill-2 hover:text-lo-text-1"
           :title="`正文里已标 ${marked} 处，点击清除`"
           @click="clearMarks()"
         >
@@ -565,7 +565,7 @@ watch(aiPanelOpen, (open) => {
         <button
           type="button"
           aria-label="关闭 AI 助手"
-          class="rounded-md p-1 text-[#636366] transition-colors hover:text-[#F5F5F7]"
+          class="rounded-md p-1 text-lo-text-4 transition-colors hover:text-lo-text-1"
           @click="closeAiPanel()"
         >
           <AppIcon name="x" class="h-4 w-4" />
@@ -574,24 +574,24 @@ watch(aiPanelOpen, (open) => {
 
       <p
         v-if="offline"
-        class="shrink-0 border-b border-[#FF9F0A]/20 bg-[#FF9F0A]/[0.08] px-4 py-2 text-[11px] leading-relaxed text-[#FFB340]"
+        class="shrink-0 border-b border-[#FF9F0A]/20 bg-[#FF9F0A]/[0.08] px-4 py-2 text-[11px] leading-relaxed text-lo-warning-text"
       >
         当前离线，AI 需联网；本地功能不受影响
       </p>
 
       <!-- 三档工具栏 -->
-      <nav class="flex shrink-0 items-center gap-1 border-b border-white/[0.06] px-3 py-1.5">
+      <nav class="flex shrink-0 items-center gap-1 border-b border-lo-border-soft px-3 py-1.5">
         <button
           v-for="t in TABS"
           :key="t.id"
           type="button"
           class="rounded-full px-2.5 py-1 text-[11.5px] transition-colors"
-          :class="tab === t.id ? 'bg-[#0A84FF]/20 text-[#6FB6FF]' : 'text-[#98989D] hover:bg-white/[0.06] hover:text-[#F5F5F7]'"
+          :class="tab === t.id ? 'bg-[#0A84FF]/20 text-lo-accent-text' : 'text-lo-text-2 hover:bg-lo-fill-2 hover:text-lo-text-1'"
           @click="tab = t.id"
         >
           {{ t.label }}
         </button>
-        <span v-if="marked > 0" class="ml-auto text-[10.5px] text-[#30D158]">正文已标 {{ marked }} 处</span>
+        <span v-if="marked > 0" class="ml-auto text-[10.5px] text-lo-success-text">正文已标 {{ marked }} 处</span>
       </nav>
 
       <div ref="listRef" class="thin-scroll min-h-0 flex-1 overflow-y-auto px-4 py-3">
@@ -608,7 +608,7 @@ watch(aiPanelOpen, (open) => {
             </button>
 
             <label
-              class="mt-1 flex cursor-pointer items-center gap-1.5 text-[11px] text-[#98989D] hover:text-[#F5F5F7]"
+              class="mt-1 flex cursor-pointer items-center gap-1.5 text-[11px] text-lo-text-2 hover:text-lo-text-1"
               title="事实与常识错误（如「水往山顶流」）规则查不出，需要模型"
             >
               <input v-model="useFactCheck" type="checkbox" class="h-3 w-3 accent-[#0A84FF]" />
@@ -617,26 +617,26 @@ watch(aiPanelOpen, (open) => {
             <button
               v-if="marked > 0"
               type="button"
-              class="rounded-full border border-white/[0.08] px-2.5 py-1 text-[11px] text-[#98989D] hover:text-[#F5F5F7]"
+              class="rounded-full border border-lo-border px-2.5 py-1 text-[11px] text-lo-text-2 hover:text-lo-text-1"
               @click="clearMarks()"
             >
               清除正文标记
             </button>
           </div>
-          <p v-if="!report && !checkError" class="text-[12px] leading-relaxed text-[#98989D]">
+          <p v-if="!report && !checkError" class="text-[12px] leading-relaxed text-lo-text-2">
             检查结构、数据、表达、体例四类问题，结果会直接标在正文里（左侧色条 + 编号）。
           </p>
           <div v-if="checkError" class="rounded-[12px] border border-[#FF453A]/40 bg-[#FF453A]/10 px-3 py-2">
-            <p class="text-[12px] text-[#FF8A84]">{{ checkError }}</p>
+            <p class="text-[12px] text-lo-danger-text">{{ checkError }}</p>
             <button class="mt-1 text-[11.5px] text-[#0A84FF]" type="button" @click="checkDoc()">重试</button>
           </div>
           <template v-else-if="report">
               <div
                 v-if="dismissedHint > 0"
-                class="mb-2 flex items-center justify-between gap-2 rounded-[10px] border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-[11px] text-[#98989D]"
+                class="mb-2 flex items-center justify-between gap-2 rounded-[10px] border border-lo-border bg-lo-fill-1 px-3 py-2 text-[11px] text-lo-text-2"
               >
                 <span>已按记忆跳过 {{ dismissedHint }} 条（上次标记为「不用改」）</span>
-                <button type="button" class="shrink-0 text-[#6FB6FF] hover:underline" @click="restoreDismissed">
+                <button type="button" class="shrink-0 text-lo-accent-text hover:underline" @click="restoreDismissed">
                   恢复
                 </button>
               </div>
@@ -646,22 +646,22 @@ watch(aiPanelOpen, (open) => {
 
         <!-- ===== 改写档 ===== -->
         <div v-else-if="tab === 'rewrite'" class="flex flex-col gap-3">
-          <p v-if="mdSourceActive" class="rounded-[12px] border border-[#FF9F0A]/30 bg-[#FF9F0A]/[0.06] px-3 py-2 text-[12px] leading-relaxed text-[#FFB340]">
+          <p v-if="mdSourceActive" class="rounded-[12px] border border-[#FF9F0A]/30 bg-[#FF9F0A]/[0.06] px-3 py-2 text-[12px] leading-relaxed text-lo-warning-text">
             当前是 Markdown 源码模式。源码里没有可划选的正文，切到「预览」后即可选区改写。
           </p>
           <div v-if="selection" class="rounded-[12px] border border-[#30D158]/30 bg-[#30D158]/[0.06] p-3">
-            <p class="mb-1 text-[11px] text-[#30D158]">选中的正文（{{ selection.text.length }} 字）</p>
-            <p class="max-h-24 overflow-y-auto text-[12px] leading-relaxed text-[#D9D9DE]">{{ selection.text }}</p>
+            <p class="mb-1 text-[11px] text-lo-success-text">选中的正文（{{ selection.text.length }} 字）</p>
+            <p class="max-h-24 overflow-y-auto text-[12px] leading-relaxed text-lo-text-1">{{ selection.text }}</p>
           </div>
-          <p v-else class="rounded-[12px] bg-[#1F1F21] px-3 py-2 text-[12px] leading-relaxed text-[#98989D]">
+          <p v-else class="rounded-[12px] bg-lo-surface-3 px-3 py-2 text-[12px] leading-relaxed text-lo-text-2">
             还没选中正文。到左边文档里划选一段（至少 10 字），这里就会出现内容。
           </p>
 
           <div class="flex items-center gap-2">
-            <span class="text-[11.5px] text-[#636366]">文体</span>
+            <span class="text-[11.5px] text-lo-text-4">文体</span>
             <select
               v-model="genre"
-              class="rounded-[8px] border border-white/[0.08] bg-[#1F1F21] px-2 py-1 text-[11.5px] text-[#F5F5F7] outline-none"
+              class="rounded-[8px] border border-lo-border bg-lo-surface-3 px-2 py-1 text-[11.5px] text-lo-text-1 outline-none"
             >
               <option v-for="g in GENRES" :key="g.v" :value="g.v">{{ g.label }}</option>
             </select>
@@ -672,7 +672,7 @@ watch(aiPanelOpen, (open) => {
             <div class="flex items-center gap-2">
               <button
                 type="button"
-                class="lo-press flex-1 rounded-full border border-white/[0.12] bg-[#1F1F21] px-3 py-1.5 text-[12px] font-medium text-[#F5F5F7] disabled:opacity-40"
+                class="lo-press flex-1 rounded-full border border-lo-border-strong bg-lo-surface-3 px-3 py-1.5 text-[12px] font-medium text-lo-text-1 disabled:opacity-40"
                 :disabled="!selection || busy || mdSourceActive"
                 @click="rewriteCurrentSelection('normalize')"
               >
@@ -688,7 +688,7 @@ watch(aiPanelOpen, (open) => {
               </button>
               <button
                 type="button"
-                class="lo-press rounded-full border border-[#30D158]/50 px-3 py-1.5 text-[12px] font-medium text-[#7BE495] disabled:opacity-40"
+                class="lo-press rounded-full border border-[#30D158]/50 px-3 py-1.5 text-[12px] font-medium text-lo-success-text disabled:opacity-40"
                 :disabled="continuing || !activeDoc"
                 title="接着正文末尾往下写一段，写完可一键追加"
                 @click="runContinue"
@@ -698,24 +698,24 @@ watch(aiPanelOpen, (open) => {
             </div>
 
             <!-- 续写结果：确认后再追加，不自动写正文 -->
-            <div v-if="continueError" class="rounded-[10px] border border-[#FFB340]/40 bg-[#FFB340]/10 px-3 py-2 text-[11.5px] text-[#FFC86B]">
+            <div v-if="continueError" class="rounded-[10px] border border-[#FFB340]/40 bg-[#FFB340]/10 px-3 py-2 text-[11.5px] text-lo-warning-text">
               {{ continueError }}
             </div>
-            <div v-else-if="continuation" class="flex flex-col gap-2 rounded-[12px] bg-[#1F1F21] p-3">
+            <div v-else-if="continuation" class="flex flex-col gap-2 rounded-[12px] bg-lo-surface-3 p-3">
               <div class="flex items-center justify-between">
-                <span class="text-[11px] text-[#636366]">
+                <span class="text-[11px] text-lo-text-4">
                   续写结果（{{ continuation.length }} 字）· 依据：{{ continueSource === 'cursor' ? '光标前文' : '文末' }}
                 </span>
-                <span class="text-[10.5px] text-[#636366]">确认后再写入</span>
+                <span class="text-[10.5px] text-lo-text-4">确认后再写入</span>
               </div>
               <!-- 承接的锚句：让用户一眼看出接没接上 -->
-              <p v-if="continueAnchor" class="rounded-[8px] bg-white/[0.04] px-2 py-1 text-[11px] leading-relaxed text-[#98989D]">
+              <p v-if="continueAnchor" class="rounded-[8px] bg-lo-fill-1 px-2 py-1 text-[11px] leading-relaxed text-lo-text-2">
                 承接：…{{ continueAnchor }}
               </p>
-              <p v-if="!continueLinked" class="text-[11px] text-[#FFC86B]">
+              <p v-if="!continueLinked" class="text-[11px] text-lo-warning-text">
                 这篇衔接可能跳了场景：开头与上句没有共同内容，建议重写或手动调整。
               </p>
-              <p class="whitespace-pre-wrap text-[12.5px] leading-relaxed text-[#F5F5F7]">{{ continuation }}</p>
+              <p class="whitespace-pre-wrap text-[12.5px] leading-relaxed text-lo-text-1">{{ continuation }}</p>
               <div class="flex flex-wrap items-center gap-2">
                 <!-- 主按钮跟着"依据"走：从光标前文续写 → 插入光标处才是接得上的 -->
                 <button
@@ -737,7 +737,7 @@ watch(aiPanelOpen, (open) => {
                 <button
                   v-if="continueSource === 'cursor'"
                   type="button"
-                  class="rounded-full border border-white/[0.12] px-3 py-1 text-[11.5px] text-[#F5F5F7]"
+                  class="rounded-full border border-lo-border-strong px-3 py-1 text-[11.5px] text-lo-text-1"
                   @click="appendContinuation"
                 >
                   改放文末
@@ -745,54 +745,54 @@ watch(aiPanelOpen, (open) => {
                 <button
                   v-else
                   type="button"
-                  class="rounded-full border border-white/[0.12] px-3 py-1 text-[11.5px] text-[#F5F5F7]"
+                  class="rounded-full border border-lo-border-strong px-3 py-1 text-[11.5px] text-lo-text-1"
                   @click="insertContinuation"
                 >
                   插入光标处
                 </button>
                 <button
                   type="button"
-                  class="rounded-full px-2 py-1 text-[11px] text-[#98989D] hover:text-[#F5F5F7]"
+                  class="rounded-full px-2 py-1 text-[11px] text-lo-text-2 hover:text-lo-text-1"
                   @click="continuation = ''"
                 >
                   丢弃
                 </button>
               </div>
             </div>
-            <p class="text-[10.5px] leading-relaxed text-[#636366]">
+            <p class="text-[10.5px] leading-relaxed text-lo-text-4">
               规范修正：只改语病（的得地、错别字、赘余），幅度受限，可直接替换。
               更优美：允许加意象、换句式，但数字、人名与新增情节一律拦下。
             </p>
           </div>
 
           <template v-for="turn in turns.filter((t) => t.mode === 'rewrite').slice(-1)" :key="turn.id">
-            <div v-if="turn.status === 'loading'" class="text-[12px] text-[#98989D]">正在改写… {{ turn.seconds }} 秒</div>
+            <div v-if="turn.status === 'loading'" class="text-[12px] text-lo-text-2">正在改写… {{ turn.seconds }} 秒</div>
             <!-- 规则层没发现可改的地方：直接说没问题，不摆一版和原文一样的"改写" -->
             <div
               v-else-if="turn.noChange"
               class="rounded-[12px] border border-[#30D158]/30 bg-[#30D158]/10 px-3 py-2"
             >
-              <p class="text-[12.5px] font-medium text-[#7BE495]">没有可改的地方</p>
-              <p class="mt-1 text-[11px] text-[#98989D]">{{ turn.note || '规则与模型都没有发现需要修改的地方。' }}</p>
+              <p class="text-[12.5px] font-medium text-lo-success-text">没有可改的地方</p>
+              <p class="mt-1 text-[11px] text-lo-text-2">{{ turn.note || '规则与模型都没有发现需要修改的地方。' }}</p>
             </div>
             <div v-else-if="turn.candidate !== undefined" class="flex flex-col gap-2">
               <!-- diff 对比：红=删，绿=增 -->
-              <div class="rounded-[12px] bg-[#1F1F21] p-3">
+              <div class="rounded-[12px] bg-lo-surface-3 p-3">
                 <div class="mb-1.5 flex items-center justify-between">
-                  <span class="text-[11px] text-[#636366]">改写对比</span>
-                  <span class="text-[10.5px] text-[#636366]">
+                  <span class="text-[11px] text-lo-text-4">改写对比</span>
+                  <span class="text-[10.5px] text-lo-text-4">
                     删 {{ diffStat(turn).removed }} 字 / 增 {{ diffStat(turn).added }} 字
                   </span>
                 </div>
-                <p class="whitespace-pre-wrap text-[13px] leading-relaxed text-[#F5F5F7]">
+                <p class="whitespace-pre-wrap text-[13px] leading-relaxed text-lo-text-1">
                   <span
                     v-for="(seg, i) in diffOf(turn)"
                     :key="i"
                     :class="
                       seg.type === 'del'
-                        ? 'bg-[#FF453A]/20 text-[#FF8A84] line-through'
+                        ? 'bg-[#FF453A]/20 text-lo-danger-text line-through'
                         : seg.type === 'ins'
-                          ? 'bg-[#30D158]/20 text-[#7BE495]'
+                          ? 'bg-[#30D158]/20 text-lo-success-text'
                           : ''
                     "
                     >{{ seg.text }}</span
@@ -801,8 +801,8 @@ watch(aiPanelOpen, (open) => {
               </div>
 
               <div v-if="turn.changes?.length" class="flex flex-col gap-1">
-                <p class="text-[11px] text-[#636366]">术语/格式改动（{{ turn.changes.length }} 处）</p>
-                <p v-for="(c, i) in turn.changes" :key="i" class="text-[11.5px] text-[#98989D]">
+                <p class="text-[11px] text-lo-text-4">术语/格式改动（{{ turn.changes.length }} 处）</p>
+                <p v-for="(c, i) in turn.changes" :key="i" class="text-[11.5px] text-lo-text-2">
                   · {{ c.type }}：{{ c.from }} → {{ c.to }}<span v-if="c.note">（{{ c.note }}）</span>
                 </p>
               </div>
@@ -817,16 +817,16 @@ watch(aiPanelOpen, (open) => {
                 </button>
                 <button
                   type="button"
-                  class="rounded-full bg-[#3A3A3C] px-2.5 py-1 text-[11px] text-[#F5F5F7] hover:bg-[#48484A]"
+                  class="rounded-full bg-lo-surface-4 px-2.5 py-1 text-[11px] text-lo-text-1 hover:bg-lo-surface-hover"
                   @click="copyCandidate(turn.candidate ?? '')"
                 >
                   复制
                 </button>
-                <span class="text-[11px] text-[#636366]">{{ turn.hint }}</span>
+                <span class="text-[11px] text-lo-text-4">{{ turn.hint }}</span>
               </div>
-              <p class="text-[11px] text-[#636366]">替换后可 Ctrl+Z 撤销，不会动其它段落</p>
+              <p class="text-[11px] text-lo-text-4">替换后可 Ctrl+Z 撤销，不会动其它段落</p>
             </div>
-            <p v-else-if="turn.error" class="text-[12px] text-[#FF8A84]">{{ turn.error.message }}</p>
+            <p v-else-if="turn.error" class="text-[12px] text-lo-danger-text">{{ turn.error.message }}</p>
           </template>
         </div>
 
@@ -834,14 +834,14 @@ watch(aiPanelOpen, (open) => {
         <template v-else>
         <!-- 空状态：3 条示例 -->
         <div v-if="!turns.filter((t) => t.mode !== 'rewrite').length && !report" class="flex flex-col gap-2">
-          <p class="text-[12px] leading-relaxed text-[#98989D]">
+          <p class="text-[12px] leading-relaxed text-lo-text-2">
             想快点看到效果？直接在「检查」档点一下按钮，问题会标在正文左侧，点建议能跳到对应段落。
           </p>
           <button
             v-for="example in EXAMPLES"
             :key="example"
             type="button"
-            class="rounded-[12px] bg-[#2C2C2E] px-3 py-2.5 text-left text-[12.5px] text-[#F5F5F7] transition-colors hover:bg-[#3A3A3C] disabled:pointer-events-none disabled:opacity-40"
+            class="rounded-[12px] bg-lo-elevated px-3 py-2.5 text-left text-[12.5px] text-lo-text-1 transition-colors hover:bg-lo-surface-4 disabled:pointer-events-none disabled:opacity-40"
             :disabled="busy"
             @click="send(example)"
           >
@@ -852,7 +852,7 @@ watch(aiPanelOpen, (open) => {
         <!-- 对话 -->
         <div v-for="turn in turns" :key="turn.id" class="mb-3 last:mb-0">
           <p class="mb-2 text-right">
-            <span class="inline-block max-w-full rounded-[12px] bg-[#0A84FF]/15 px-3 py-2 text-[12.5px] leading-relaxed text-[#F5F5F7]">
+            <span class="inline-block max-w-full rounded-[12px] bg-[#0A84FF]/15 px-3 py-2 text-[12.5px] leading-relaxed text-lo-text-1">
               {{ turn.question }}
             </span>
           </p>
@@ -860,13 +860,13 @@ watch(aiPanelOpen, (open) => {
           <!-- 等待态 -->
           <div
             v-if="turn.status === 'loading'"
-            class="flex items-center gap-2 rounded-[12px] bg-[#1F1F21] px-3 py-2.5 text-[12px] text-[#98989D]"
+            class="flex items-center gap-2 rounded-[12px] bg-lo-surface-3 px-3 py-2.5 text-[12px] text-lo-text-2"
           >
             <AppIcon name="loader" class="lo-spin h-3.5 w-3.5 text-[#0A84FF]" :stroke-width="2" />
             <span class="tabular-nums">正在执行… 已等待 {{ turn.seconds }} 秒</span>
             <button
               type="button"
-              class="ml-auto rounded-full border border-white/[0.08] px-2 py-0.5 text-[11px] text-[#F5F5F7] hover:bg-white/[0.06]"
+              class="ml-auto rounded-full border border-lo-border px-2 py-0.5 text-[11px] text-lo-text-1 hover:bg-lo-fill-2"
               @click="cancel()"
             >
               取消
@@ -876,7 +876,7 @@ watch(aiPanelOpen, (open) => {
           <!-- 已取消 -->
           <p
             v-else-if="turn.status === 'cancelled'"
-            class="rounded-[12px] bg-[#1F1F21] px-3 py-2 text-[11.5px] text-[#636366]"
+            class="rounded-[12px] bg-lo-surface-3 px-3 py-2 text-[11.5px] text-lo-text-4"
           >
             已取消，本次没有改动文档
           </p>
@@ -886,75 +886,75 @@ watch(aiPanelOpen, (open) => {
             v-else-if="turn.status === 'error'"
             class="rounded-[12px] border border-[#FF453A]/40 bg-[#FF453A]/10 px-3 py-2.5"
           >
-            <p class="text-[12px] leading-relaxed text-[#FF6961]">{{ turn.error?.message }}</p>
+            <p class="text-[12px] leading-relaxed text-lo-danger-text">{{ turn.error?.message }}</p>
             <div class="mt-1.5 flex items-center gap-2">
               <button
                 v-if="turn.error?.retryable"
                 type="button"
-                class="rounded-full bg-[#3A3A3C] px-2.5 py-1 text-[11px] text-[#F5F5F7] hover:bg-[#48484A]"
+                class="rounded-full bg-lo-surface-4 px-2.5 py-1 text-[11px] text-lo-text-1 hover:bg-lo-surface-hover"
                 @click="retry(turn)"
               >
                 重试
               </button>
-              <span class="text-[11px] text-[#636366]">本地文档未受影响</span>
+              <span class="text-[11px] text-lo-text-4">本地文档未受影响</span>
             </div>
           </div>
 
           <!-- 知识库问答结果 -->
           <div v-else-if="turn.mode === 'kb' && turn.kbAnswer" class="flex flex-col gap-2">
-            <p class="whitespace-pre-wrap text-[13.5px] leading-relaxed text-[#F5F5F7]">{{ turn.kbAnswer }}</p>
-            <div v-if="turn.citations?.length" class="flex flex-col gap-1 rounded-[12px] bg-[#1F1F21] p-2.5">
-              <p class="text-[11px] text-[#636366]">依据（{{ turn.citations.length }} 条）</p>
+            <p class="whitespace-pre-wrap text-[13.5px] leading-relaxed text-lo-text-1">{{ turn.kbAnswer }}</p>
+            <div v-if="turn.citations?.length" class="flex flex-col gap-1 rounded-[12px] bg-lo-surface-3 p-2.5">
+              <p class="text-[11px] text-lo-text-4">依据（{{ turn.citations.length }} 条）</p>
               <div v-for="c in turn.citations" :key="c.n" class="flex items-start gap-1.5">
                 <span class="shrink-0 rounded-[6px] px-[5px] py-[1px] text-[10.5px] leading-[1.5]"
-                  :class="c.source === 'doc' ? 'bg-[#30D158]/15 text-[#30D158]' : 'bg-[#0A84FF]/15 text-[#6FB6FF]'">
+                  :class="c.source === 'doc' ? 'bg-[#30D158]/15 text-lo-success-text' : 'bg-[#0A84FF]/15 text-lo-accent-text'">
                   {{ c.source === 'doc' ? '本文·' + ((c.para ?? 0) + 1) : 'kb·' + c.n }}
                 </span>
-                <span class="min-w-0 break-words text-[11.5px] leading-relaxed text-[#98989D]">
+                <span class="min-w-0 break-words text-[11.5px] leading-relaxed text-lo-text-2">
                   {{ c.source === 'doc' ? '' : '《' + c.doc + '》' }}{{ c.heading || '' }} {{ c.snippet }}
                 </span>
               </div>
             </div>
-            <p v-if="turn.hint" class="text-[11px] text-[#FFB340]">{{ turn.hint }}</p>
+            <p v-if="turn.hint" class="text-[11px] text-lo-warning-text">{{ turn.hint }}</p>
           </div>
 
           <!-- 改写结果 -->
           <div v-else-if="turn.mode === 'rewrite' && turn.candidate !== undefined" class="flex flex-col gap-2">
-            <p class="whitespace-pre-wrap rounded-[12px] bg-[#1F1F21] p-3 text-[13px] leading-relaxed text-[#F5F5F7]">
+            <p class="whitespace-pre-wrap rounded-[12px] bg-lo-surface-3 p-3 text-[13px] leading-relaxed text-lo-text-1">
               {{ turn.candidate }}
             </p>
             <div v-if="turn.changes?.length" class="flex flex-col gap-1">
-              <p class="text-[11px] text-[#636366]">改动（{{ turn.changes.length }} 处）</p>
-              <p v-for="(c, i) in turn.changes" :key="i" class="text-[11.5px] text-[#98989D]">
+              <p class="text-[11px] text-lo-text-4">改动（{{ turn.changes.length }} 处）</p>
+              <p v-for="(c, i) in turn.changes" :key="i" class="text-[11.5px] text-lo-text-2">
                 · {{ c.type }}：{{ c.from }} → {{ c.to }}<span v-if="c.note">（{{ c.note }}）</span>
               </p>
             </div>
             <div class="flex items-center gap-2">
               <button
                 type="button"
-                class="rounded-full bg-[#3A3A3C] px-2.5 py-1 text-[11px] text-[#F5F5F7] hover:bg-[#48484A]"
+                class="rounded-full bg-lo-surface-4 px-2.5 py-1 text-[11px] text-lo-text-1 hover:bg-lo-surface-hover"
                 @click="copyCandidate(turn.candidate ?? '')"
               >
                 复制改写结果
               </button>
-              <span class="text-[11px] text-[#636366]">{{ turn.hint }}</span>
+              <span class="text-[11px] text-lo-text-4">{{ turn.hint }}</span>
             </div>
-            <p class="text-[11px] text-[#636366]">助手不会改动正文，请确认后手动替换</p>
+            <p class="text-[11px] text-lo-text-4">助手不会改动正文，请确认后手动替换</p>
           </div>
 
           <!-- Agent 结果 -->
           <div v-else-if="turn.result" class="flex flex-col gap-2">
-            <p class="whitespace-pre-wrap text-[13.5px] leading-relaxed text-[#F5F5F7]">{{ turn.result.answer }}</p>
+            <p class="whitespace-pre-wrap text-[13.5px] leading-relaxed text-lo-text-1">{{ turn.result.answer }}</p>
 
-            <div v-if="turn.result.steps.length" class="flex flex-col gap-1 rounded-[12px] bg-[#1F1F21] p-2.5">
-              <p class="mb-0.5 text-[11px] text-[#636366]">执行过程（{{ turn.result.steps.length }} 步）</p>
+            <div v-if="turn.result.steps.length" class="flex flex-col gap-1 rounded-[12px] bg-lo-surface-3 p-2.5">
+              <p class="mb-0.5 text-[11px] text-lo-text-4">执行过程（{{ turn.result.steps.length }} 步）</p>
               <div v-for="(step, index) in turn.result.steps" :key="index" class="flex items-start gap-1.5">
                 <span
-                  class="mt-[1px] shrink-0 rounded-[6px] bg-[#3A3A3C] px-[5px] py-[1px] text-[10.5px] leading-[1.5] text-[#98989D]"
+                  class="mt-[1px] shrink-0 rounded-[6px] bg-lo-surface-4 px-[5px] py-[1px] text-[10.5px] leading-[1.5] text-lo-text-2"
                 >
                   {{ PHASE_LABEL[step.phase] ?? step.phase }}
                 </span>
-                <span class="min-w-0 break-words text-[12px] leading-relaxed text-[#98989D]">{{ step.detail }}</span>
+                <span class="min-w-0 break-words text-[12px] leading-relaxed text-lo-text-2">{{ step.detail }}</span>
               </div>
             </div>
 
@@ -962,13 +962,13 @@ watch(aiPanelOpen, (open) => {
               <span
                 v-for="tool in turn.result.toolsUsed"
                 :key="tool"
-                class="rounded-full bg-[#0A84FF]/15 px-2 py-0.5 text-[11px] text-[#6FB6FF]"
+                class="rounded-full bg-[#0A84FF]/15 px-2 py-0.5 text-[11px] text-lo-accent-text"
               >
                 {{ tool }}
               </span>
               <span
                 v-if="turn.result.mock"
-                class="rounded-full border border-white/[0.08] px-2 py-0.5 text-[11px] text-[#98989D]"
+                class="rounded-full border border-lo-border px-2 py-0.5 text-[11px] text-lo-text-2"
                 title="后端没有配置模型凭据，本次回答由本地规则生成"
               >
                 离线模拟
@@ -977,19 +977,19 @@ watch(aiPanelOpen, (open) => {
 
             <!-- 引用定位：点一下跳到正文对应段落 -->
             <div v-if="turn.result.refs.length" class="flex flex-wrap items-center gap-1.5">
-              <span class="text-[11px] text-[#636366]">引用</span>
+              <span class="text-[11px] text-lo-text-4">引用</span>
               <button
                 v-for="r in turn.result.refs"
                 :key="r.para"
                 type="button"
-                class="rounded-full bg-[#30D158]/15 px-2 py-0.5 text-[11px] text-[#30D158] hover:bg-[#30D158]/25"
+                class="rounded-full bg-[#30D158]/15 px-2 py-0.5 text-[11px] text-lo-success-text hover:bg-[#30D158]/25"
                 :title="r.snippet"
                 @click="markRefs(r.para)"
               >
                 第 {{ r.para + 1 }} 段
               </button>
             </div>
-            <p v-else class="text-[11px] leading-relaxed text-[#FFB340]">
+            <p v-else class="text-[11px] leading-relaxed text-lo-warning-text">
               这条回答没有引用到具体段落，请核对原文后再采用。
             </p>
           </div>
@@ -1000,19 +1000,19 @@ watch(aiPanelOpen, (open) => {
         <!-- 全局提示：三档共用（替换成功、复制失败等） -->
         <p
           v-if="notice"
-          class="mt-2 rounded-[12px] border border-[#30D158]/30 bg-[#30D158]/[0.08] px-3 py-2 text-[12px] text-[#7BE495]"
+          class="mt-2 rounded-[12px] border border-[#30D158]/30 bg-[#30D158]/[0.08] px-3 py-2 text-[12px] text-lo-success-text"
         >
           {{ notice }}
         </p>
       </div>
 
-      <footer v-if="tab === 'chat'" class="shrink-0 border-t border-white/[0.06] p-3">
+      <footer v-if="tab === 'chat'" class="shrink-0 border-t border-lo-border-soft p-3">
         <div class="flex items-end gap-2">
           <input
             v-model="draft"
             type="text"
             placeholder="问点关于这份文档的问题…"
-            class="h-9 min-w-0 flex-1 rounded-[10px] border border-white/[0.08] bg-[#1F1F21] px-3 text-[12.5px] text-[#F5F5F7] outline-none placeholder:text-[#636366] focus:border-[#0A84FF]/60"
+            class="h-9 min-w-0 flex-1 rounded-[10px] border border-lo-border bg-lo-surface-3 px-3 text-[12.5px] text-lo-text-1 outline-none placeholder:text-lo-text-4 focus:border-[#0A84FF]/60"
             :disabled="busy"
             @keydown="onKeydown"
           />
@@ -1026,14 +1026,14 @@ watch(aiPanelOpen, (open) => {
             发送
           </button>
         </div>
-        <p v-if="selection" class="mt-1.5 flex items-center gap-1.5 text-[11px] text-[#30D158]">
+        <p v-if="selection" class="mt-1.5 flex items-center gap-1.5 text-[11px] text-lo-success-text">
           <span class="truncate">已选中 {{ selection.text.length }} 字：{{ selection.text.slice(0, 20) }}…</span>
-          <button type="button" class="shrink-0 text-[#636366] hover:text-[#F5F5F7]" @click="selection = null">清除</button>
+          <button type="button" class="shrink-0 text-lo-text-4 hover:text-lo-text-1" @click="selection = null">清除</button>
         </p>
         <div class="mt-1.5 flex items-center gap-1.5">
           <button
             type="button"
-            class="rounded-full border border-white/[0.08] px-2.5 py-1 text-[11px] text-[#A1A1A6] hover:bg-white/[0.06] hover:text-[#F5F5F7] disabled:opacity-40"
+            class="rounded-full border border-lo-border px-2.5 py-1 text-[11px] text-lo-text-3 hover:bg-lo-fill-2 hover:text-lo-text-1 disabled:opacity-40"
             :disabled="busy || !activeDoc"
             @click="askKnowledgeBase()"
           >
@@ -1041,7 +1041,7 @@ watch(aiPanelOpen, (open) => {
           </button>
           <button
             type="button"
-            class="rounded-full border border-white/[0.08] px-2.5 py-1 text-[11px] text-[#A1A1A6] hover:bg-white/[0.06] hover:text-[#F5F5F7] disabled:opacity-40"
+            class="rounded-full border border-lo-border px-2.5 py-1 text-[11px] text-lo-text-3 hover:bg-lo-fill-2 hover:text-lo-text-1 disabled:opacity-40"
             :disabled="busy || !selection"
             @click="rewriteCurrentSelection('normalize')"
           >
@@ -1049,8 +1049,8 @@ watch(aiPanelOpen, (open) => {
           </button>
         </div>
 
-        <p class="mt-1.5 flex items-center gap-1 text-[11px] text-[#636366]">
-          <AppIcon name="lock" class="h-3 w-3 text-[#30D158]" :stroke-width="2" />
+        <p class="mt-1.5 flex items-center gap-1 text-[11px] text-lo-text-4">
+          <AppIcon name="lock" class="h-3 w-3 text-lo-success-text" :stroke-width="2" />
           只读取当前文档做分析，不会修改正文
         </p>
       </footer>

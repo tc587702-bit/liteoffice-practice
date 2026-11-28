@@ -10,7 +10,7 @@ const { fatal } = storeToRefs(store)
 </script>
 
 <template>
-  <div v-if="fatal" class="fixed inset-0 z-[70] flex items-center justify-center bg-black/75 px-4 backdrop-blur-sm">
+  <div v-if="fatal" class="fixed inset-0 z-[70] flex items-center justify-center bg-lo-scrim px-4 backdrop-blur-sm">
     <section
       role="alertdialog"
       aria-modal="true"
@@ -19,13 +19,13 @@ const { fatal } = storeToRefs(store)
     >
       <div class="flex items-start gap-3">
         <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#FF453A]/15">
-          <AppIcon name="alert-triangle" class="h-4 w-4 text-[#FF6961]" />
+          <AppIcon name="alert-triangle" class="h-4 w-4 text-lo-danger-text" />
         </span>
         <div class="min-w-0">
-          <h2 id="lo-fatal-title" class="text-[15px] font-semibold leading-snug text-[#F5F5F7]">
+          <h2 id="lo-fatal-title" class="text-[15px] font-semibold leading-snug text-lo-text-1">
             无法继续解析：{{ fatal.fileName }}
           </h2>
-          <p class="mt-1.5 text-[12.5px] leading-relaxed text-[#A1A1A6]">{{ fatal.message }}</p>
+          <p class="mt-1.5 text-[12.5px] leading-relaxed text-lo-text-3">{{ fatal.message }}</p>
         </div>
       </div>
 

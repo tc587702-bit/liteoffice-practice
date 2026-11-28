@@ -75,7 +75,7 @@ function isLegacy(slide: RichSlide): boolean {
 
 <template>
   <section class="mx-auto mb-6 w-full max-w-[960px]">
-    <div class="mb-2 flex items-center justify-between gap-3 text-[11.5px] text-[#636366]">
+    <div class="mb-2 flex items-center justify-between gap-3 text-[11.5px] text-lo-text-4">
       <span>幻灯片（{{ slides.length }} 页）· 按原版式渲染，只读</span>
       <span>字号/颜色/位置来自 PPT 原始数据</span>
     </div>
@@ -211,6 +211,6 @@ function isLegacy(slide: RichSlide): boolean {
       </div>
     </div>
 
-    <p v-if="!slides.length" class="text-[12px] text-[#98989D]">这份 PPTX 没有解析出可渲染内容。</p>
+    <p v-if="!slides.length" class="text-[12px] text-lo-text-2">这份 PPTX 没有解析出可渲染内容。</p>
   </section>
 </template>

@@ -6,10 +6,13 @@
 /* 冻结深色令牌                                                         */
 /* ------------------------------------------------------------------ */
 :root {
+  color-scheme: dark;
   --lo-bg: #000000;
   --lo-card: #303032;
   --lo-card-radius: 24px;
   --lo-border: rgba(255, 255, 255, 0.08);
+  --lo-border-soft: rgba(255, 255, 255, 0.06);
+  --lo-border-strong: rgba(255, 255, 255, 0.16);
   --lo-divider: rgba(255, 255, 255, 0.06);
   --lo-primary: #0a84ff;
   --lo-primary-hover: #339bff;
@@ -20,8 +23,70 @@
   --lo-text-2: #98989d;
   --lo-text-3: #a1a1a6;
   --lo-text-4: #636366;
+  --lo-text-5: #c7c7cc;
+  --lo-accent-text: #6fb6ff;
+  --lo-accent-hover: #339bff;
+  --lo-success-text: #5ce07e;
+  --lo-warning-text: #ffb340;
+  --lo-danger-text: #ff6961;
+  --lo-scrim: rgba(0, 0, 0, 0.7);
   --lo-glass: rgba(28, 28, 30, 0.75);
   --lo-glass-blur: blur(20px);
+  --lo-surface: #303032;
+  --lo-surface-2: #262628;
+  --lo-surface-3: #1f1f21;
+  --lo-surface-4: #3a3a3c;
+  --lo-surface-hover: #48484a;
+  --lo-elevated: rgba(44, 44, 46, 0.95);
+  --lo-elevated-2: #242426;
+  --lo-code: #141416;
+  --lo-inset: rgba(0, 0, 0, 0.3);
+  --lo-fill-1: rgba(255, 255, 255, 0.04);
+  --lo-fill-2: rgba(255, 255, 255, 0.06);
+  --lo-fill-3: rgba(255, 255, 255, 0.08);
+  --lo-scroll-thumb: rgba(255, 255, 255, 0.14);
+  --lo-scroll-thumb-hover: rgba(255, 255, 255, 0.24);
+  --lo-spotlight: rgba(255, 255, 255, 0.05);
+}
+
+/* 浅色模式：只覆盖语义令牌，现有深色值保持不变 */
+html[data-theme='light'] {
+  color-scheme: light;
+  --lo-bg: #f5f5f7;
+  --lo-card: #ffffff;
+  --lo-border: rgba(0, 0, 0, 0.1);
+  --lo-border-soft: rgba(0, 0, 0, 0.07);
+  --lo-border-strong: rgba(0, 0, 0, 0.16);
+  --lo-divider: rgba(0, 0, 0, 0.07);
+  --lo-secondary: #e9e9ec;
+  --lo-secondary-hover: #dedee3;
+  --lo-text-1: #1d1d1f;
+  --lo-text-2: #6e6e73;
+  --lo-text-3: #515154;
+  --lo-text-4: #8e8e93;
+  --lo-text-5: #3a3a3c;
+  --lo-accent-text: #0066cc;
+  --lo-accent-hover: #0055aa;
+  --lo-success-text: #1a7f37;
+  --lo-warning-text: #9a5b00;
+  --lo-danger-text: #d70015;
+  --lo-scrim: rgba(0, 0, 0, 0.35);
+  --lo-glass: rgba(255, 255, 255, 0.78);
+  --lo-surface: #ffffff;
+  --lo-surface-2: #f7f7fa;
+  --lo-surface-3: #f2f2f7;
+  --lo-surface-4: #e9e9ec;
+  --lo-surface-hover: #e2e2e7;
+  --lo-elevated: rgba(255, 255, 255, 0.96);
+  --lo-elevated-2: #ffffff;
+  --lo-code: #f2f2f7;
+  --lo-inset: rgba(0, 0, 0, 0.04);
+  --lo-fill-1: rgba(0, 0, 0, 0.03);
+  --lo-fill-2: rgba(0, 0, 0, 0.05);
+  --lo-fill-3: rgba(0, 0, 0, 0.07);
+  --lo-scroll-thumb: rgba(0, 0, 0, 0.18);
+  --lo-scroll-thumb-hover: rgba(0, 0, 0, 0.3);
+  --lo-spotlight: rgba(0, 0, 0, 0.05);
 }
 
 html,
@@ -65,14 +130,14 @@ body {
 /* ---------- 深色细滚动条 ---------- */
 .thin-scroll {
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
+  scrollbar-color: var(--lo-scroll-thumb) transparent;
 }
 .thin-scroll::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 .thin-scroll::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.14);
+  background: var(--lo-scroll-thumb);
   border-radius: 9999px;
 }
 .thin-scroll::-webkit-scrollbar-track {
@@ -160,7 +225,7 @@ body {
     color: var(--lo-text-3);
   }
   .lo-btn-ghost:hover {
-    background-color: rgba(255, 255, 255, 0.06);
+    background-color: var(--lo-fill-2);
     color: var(--lo-text-1);
   }
 
@@ -170,13 +235,13 @@ body {
     border: 1px solid var(--lo-border);
   }
   .lo-btn-outline:hover {
-    border-color: rgba(255, 255, 255, 0.2);
-    background-color: rgba(255, 255, 255, 0.06);
+    border-color: var(--lo-border-strong);
+    background-color: var(--lo-fill-2);
   }
 
   .lo-btn-danger {
     background-color: rgba(255, 69, 58, 0.12);
-    color: #ff8a84;
+    color: var(--lo-danger-text);
     border: 1px solid rgba(255, 69, 58, 0.3);
   }
   .lo-btn-danger:hover {
@@ -218,7 +283,7 @@ body {
   .lo-input {
     border-radius: 10px;
     border: 1px solid var(--lo-border);
-    background-color: rgba(255, 255, 255, 0.04);
+    background-color: var(--lo-fill-1);
     color: var(--lo-text-1);
     outline: none;
   }
@@ -329,14 +394,14 @@ body {
 }
 .lo-hover-lift:hover {
   transform: translateY(-2px);
-  border-color: rgba(255, 255, 255, 0.15);
+  border-color: var(--lo-border-strong);
 }
 
 /* 聚光灯 */
 .lo-spotlight {
   background: radial-gradient(
     300px circle at var(--spot-x, 50%) var(--spot-y, 50%),
-    rgba(255, 255, 255, 0.05),
+    var(--lo-spotlight),
     transparent
   );
   opacity: 0;
@@ -408,13 +473,13 @@ body {
   font-size: 13px;
   line-height: 1.8;
   tab-size: 2;
-  color: var(--lo-paper-ink);
-  caret-color: var(--lo-paper-ink);
+  color: var(--lo-text-1);
+  caret-color: var(--lo-text-1);
   white-space: pre;
   overflow-x: auto;
 }
 .lo-md-source::placeholder {
-  color: #98989d;
+  color: var(--lo-text-4);
   opacity: 0.7;
 }
 
@@ -780,7 +845,7 @@ body {
   border-bottom-color: #ffb340;
 }
 .lo-issue-inline.lo-issue-info {
-  background-color: rgba(255, 255, 255, 0.12);
+  background-color: rgba(0, 0, 0, 0.08);
   border-bottom-color: #98989d;
 }
 /* 片段标记不显示右下角数字气泡（太挤），数字留在卡片上 */

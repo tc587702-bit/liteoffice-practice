@@ -1,0 +1,67 @@
+/* ================================================================== */
+/* 主题覆盖层：只处理浅色模式下的环境光、玻璃和纸面阴影               */
+/* 深色模式继续使用 index.css / polish.css 里的原始值                 */
+/* ================================================================== */
+
+html[data-theme='light'] .lo-ambient {
+  background-color: #f5f5f7;
+  background-image:
+    radial-gradient(1100px 800px at 22% 0%, rgba(10, 132, 255, 0.1), transparent 66%),
+    radial-gradient(900px 700px at 82% 100%, rgba(48, 209, 88, 0.07), transparent 65%),
+    radial-gradient(700px 520px at 55% 45%, rgba(122, 92, 255, 0.05), transparent 68%),
+    linear-gradient(180deg, #ffffff 0%, #f5f5f7 100%);
+}
+
+html[data-theme='light'] .lo-ambient::after {
+  background:
+    radial-gradient(closest-side at 34% 46%, rgba(10, 132, 255, 0.06), transparent 72%),
+    radial-gradient(closest-side at 84% 78%, rgba(48, 209, 88, 0.04), transparent 70%);
+  filter: blur(56px);
+}
+
+html[data-theme='light'] .lo-glass-strong {
+  background-color: rgba(255, 255, 255, 0.55);
+  background-image: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.72),
+    rgba(255, 255, 255, 0.28) 32%,
+    transparent 62%
+  );
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    inset 0 0 0 1px rgba(0, 0, 0, 0.04);
+}
+
+html[data-theme='light'] .lo-paper-surface:not(.lo-paper-dark):not(.lo-paper-soft) {
+  border-color: rgba(0, 0, 0, 0.08);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.8) inset,
+    0 30px 80px -40px rgba(0, 0, 0, 0.2),
+    0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+html[data-theme='light'] .issue-card {
+  border-color: var(--lo-border);
+  background-image: linear-gradient(180deg, rgba(0, 0, 0, 0.025), transparent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+html[data-theme='light'] .thin-scroll::-webkit-scrollbar-thumb {
+  background-color: var(--lo-scroll-thumb);
+}
+
+html[data-theme='light'] .thin-scroll:hover::-webkit-scrollbar-thumb {
+  background-color: var(--lo-scroll-thumb-hover);
+}
+
+html[data-theme='light'] .lo-spotlight {
+  background: radial-gradient(
+    300px circle at var(--spot-x, 50%) var(--spot-y, 50%),
+    var(--lo-spotlight),
+    transparent
+  );
+}
+
+html[data-theme='light'] .lo-hover-lift:hover {
+  border-color: var(--lo-border-strong);
+}

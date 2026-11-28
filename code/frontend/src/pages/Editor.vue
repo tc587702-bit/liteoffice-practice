@@ -703,14 +703,6 @@ function handleRemove(id: string) {
   store.addToast({ title: '已从会话中移除', description: '原始文件未上传到任何服务器', tone: 'info' })
 }
 
-function handleReserved(target: string) {
-  store.addToast({
-    title: target === '云端工作区' ? '云端工作区正在开发中，目前请使用本地安全模式' : `${target}正在开发中`,
-    description: '本地文档仍保持选中',
-    tone: 'info',
-  })
-}
-
 function handleTextCopy() {
   if (!doc.value) return
   const result = exportTextCopy(doc.value, 'txt')
@@ -753,7 +745,7 @@ const isBinaryText = computed(() => doc.value?.kind === 'pptx' || doc.value?.kin
 </script>
 
 <template>
-  <div class="flex h-full min-h-0 flex-col overflow-hidden text-[#F5F5F7]">
+  <div class="flex h-full min-h-0 flex-col overflow-hidden text-lo-text-1">
     <TopBar :saving="saving" @save="handleSave" />
 
     <div class="flex min-h-0 flex-1">
@@ -762,7 +754,6 @@ const isBinaryText = computed(() => doc.value?.kind === 'pptx' || doc.value?.kin
         variant="editor"
         @select="store.setActive($event)"
         @remove="handleRemove"
-        @reserved="handleReserved"
       />
 
       <main class="flex min-w-0 flex-1 flex-col overflow-hidden">
@@ -771,8 +762,8 @@ const isBinaryText = computed(() => doc.value?.kind === 'pptx' || doc.value?.kin
             <span class="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-[#0A84FF]/15">
               <AppIcon name="file-text" class="h-6 w-6 text-[#0A84FF]" :stroke-width="1.7" />
             </span>
-            <h1 class="mt-4 text-[18px] font-semibold text-[#F5F5F7]">编辑器还没有内容</h1>
-            <p class="mt-2 text-[13px] leading-relaxed text-[#A1A1A6]">
+            <h1 class="mt-4 text-[18px] font-semibold text-lo-text-1">编辑器还没有内容</h1>
+            <p class="mt-2 text-[13px] leading-relaxed text-lo-text-3">
               先打开一个本机文件，左侧会话列表会显示真实文件名与大小，切换文件时内容不会互相串。
             </p>
             <div class="mt-5 flex items-center justify-center gap-2">
@@ -784,24 +775,24 @@ const isBinaryText = computed(() => doc.value?.kind === 'pptx' || doc.value?.kin
 
         <template v-else>
           <!-- 文档头 -->
-          <div class="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.06] px-4 py-2.5">
+          <div class="flex flex-wrap items-center justify-between gap-3 border-b border-lo-border-soft px-4 py-2.5">
             <div class="flex min-w-0 items-center gap-2.5">
               <span
-                class="flex h-7 w-9 shrink-0 items-center justify-center rounded-md bg-white/[0.08] text-[9px] font-bold text-[#C7C7CC]"
+                class="flex h-7 w-9 shrink-0 items-center justify-center rounded-md bg-lo-fill-3 text-[9px] font-bold text-lo-text-5"
               >
                 {{ KIND_EXT[doc.kind] }}
               </span>
               <span class="min-w-0">
                 <span class="flex items-center gap-2">
-                  <span class="truncate text-[13.5px] font-medium text-[#F5F5F7]" :title="doc.name">{{ doc.name }}</span>
+                  <span class="truncate text-[13.5px] font-medium text-lo-text-1" :title="doc.name">{{ doc.name }}</span>
                   <span
                     class="shrink-0 rounded px-1.5 py-0.5 text-[10.5px]"
-                    :class="doc.dirty ? 'bg-[#FF9F0A]/15 text-[#FFB340]' : 'bg-[#30D158]/15 text-[#5CE07E]'"
+                    :class="doc.dirty ? 'bg-[#FF9F0A]/15 text-lo-warning-text' : 'bg-[#30D158]/15 text-lo-success-text'"
                   >
                     {{ doc.dirty ? '未保存' : '已同步' }}
                   </span>
                 </span>
-                <span class="block text-[11px] tabular-nums text-[#636366]">
+                <span class="block text-[11px] tabular-nums text-lo-text-4">
                   {{ formatSize(doc.size) }}
                   <template v-if="doc.paragraphCount"> · {{ doc.paragraphCount }} 段</template>
                   <template v-if="doc.encoding"> · {{ doc.encoding.toUpperCase() }}</template>
@@ -846,7 +837,7 @@ const isBinaryText = computed(() => doc.value?.kind === 'pptx' || doc.value?.kin
               </AppButton>
               <!-- 纸面色调：三档直接选，当前档高亮（原来单按钮循环，看不出当前是哪档） -->
               <div
-                class="flex items-center gap-0.5 rounded-full border border-white/[0.08] bg-white/[0.04] p-0.5"
+                class="flex items-center gap-0.5 rounded-full border border-lo-border bg-lo-fill-1 p-0.5"
                 role="radiogroup"
                 aria-label="纸面色调"
               >
@@ -858,7 +849,7 @@ const isBinaryText = computed(() => doc.value?.kind === 'pptx' || doc.value?.kin
                   :class="
                     paperTone === tone.id
                       ? 'bg-[#0A84FF] font-medium text-white'
-                      : 'text-[#98989D] hover:text-[#F5F5F7]'
+                      : 'text-lo-text-2 hover:text-lo-text-1'
                   "
                   :title="`纸面色调：${tone.label}`"
                   :aria-pressed="paperTone === tone.id"
@@ -899,7 +890,7 @@ const isBinaryText = computed(() => doc.value?.kind === 'pptx' || doc.value?.kin
 
           <div
             v-if="doc.warnings.length > 0"
-            class="flex flex-wrap items-center gap-2 border-b border-[#FF9F0A]/15 bg-[#FF9F0A]/[0.06] px-4 py-2 text-[12px] text-[#FFB340]"
+            class="flex flex-wrap items-center gap-2 border-b border-[#FF9F0A]/15 bg-[#FF9F0A]/[0.06] px-4 py-2 text-[12px] text-lo-warning-text"
           >
             <AppIcon name="alert-triangle" class="h-3.5 w-3.5 shrink-0" />
             <span>{{ doc.warnings.join('；') }}</span>
@@ -907,33 +898,33 @@ const isBinaryText = computed(() => doc.value?.kind === 'pptx' || doc.value?.kin
 
           <div
             v-if="isBinaryText || doc.kind === 'unknown'"
-            class="flex flex-wrap items-center gap-2 border-b border-white/[0.06] bg-white/[0.03] px-4 py-2 text-[12px] text-[#A1A1A6]"
+            class="flex flex-wrap items-center gap-2 border-b border-lo-border-soft bg-lo-fill-1 px-4 py-2 text-[12px] text-lo-text-3"
           >
-            <AppIcon name="shield-alert" class="h-3.5 w-3.5 shrink-0 text-[#FF9F0A]" />
+            <AppIcon name="shield-alert" class="h-3.5 w-3.5 shrink-0 text-lo-warning-text" />
             该格式暂不支持回写编辑结果，可导出文本副本或下载原始文件。
           </div>
 
           <div
             v-if="doc.pdfError"
-            class="flex flex-wrap items-center gap-2 border-b border-[#FF453A]/20 bg-[#FF453A]/[0.07] px-4 py-2 text-[12px] text-[#FF6961]"
+            class="flex flex-wrap items-center gap-2 border-b border-[#FF453A]/20 bg-[#FF453A]/[0.07] px-4 py-2 text-[12px] text-lo-danger-text"
           >
             <AppIcon name="shield-alert" class="h-3.5 w-3.5 shrink-0" />
             <span>{{ doc.pdfError }}</span>
-            <span class="text-[#A1A1A6]">· 文本未提取，页面仍可查看；可下载原始文件</span>
+            <span class="text-lo-text-3">· 文本未提取，页面仍可查看；可下载原始文件</span>
           </div>
 
           <div
             v-if="unsafeBlocked"
-            class="flex flex-wrap items-center gap-2 border-b border-white/[0.06] bg-white/[0.03] px-4 py-2 text-[12px] text-[#A1A1A6]"
+            class="flex flex-wrap items-center gap-2 border-b border-lo-border-soft bg-lo-fill-1 px-4 py-2 text-[12px] text-lo-text-3"
           >
-            <AppIcon name="file-warning" class="h-3.5 w-3.5 shrink-0 text-[#FF9F0A]" />
+            <AppIcon name="file-warning" class="h-3.5 w-3.5 shrink-0 text-lo-warning-text" />
             部分粘贴内容包含不可信 HTML，已降级为纯文本插入。
           </div>
 
           <div class="flex min-h-0 flex-1">
             <div v-if="isSheet" class="flex min-w-0 flex-1 flex-col">
-              <div class="flex items-center gap-2 border-b border-white/[0.06] bg-[#242426] px-4 py-2 text-[12px] text-[#A1A1A6]">
-                <AppIcon name="table-2" class="h-3.5 w-3.5 text-[#30D158]" />
+              <div class="flex items-center gap-2 border-b border-lo-border-soft bg-lo-elevated-2 px-4 py-2 text-[12px] text-lo-text-3">
+                <AppIcon name="table-2" class="h-3.5 w-3.5 text-lo-success-text" />
                 单元格可直接编辑，保存下载会用 SheetJS 回写并保留工作表名
               </div>
               <SheetView :doc="doc" />
@@ -960,7 +951,7 @@ const isBinaryText = computed(() => doc.value?.kind === 'pptx' || doc.value?.kin
                 <div v-else class="mx-auto max-w-[860px]">
                   <div class="rounded-[20px] shadow-[0_24px_60px_-30px_rgba(0,0,0,0.9)]" :class="paperClass">
                     <div
-                      class="flex items-center justify-between gap-3 border-b border-[#EDEDF0] px-8 py-3 text-[11px] text-[#98989D]"
+                      class="flex items-center justify-between gap-3 border-b border-[#EDEDF0] px-8 py-3 text-[11px] text-lo-text-2"
                     >
                       <span class="truncate">{{ doc.name }}</span>
                       <span class="tabular-nums">
@@ -998,7 +989,7 @@ const isBinaryText = computed(() => doc.value?.kind === 'pptx' || doc.value?.kin
                       @blur="saveSelection"
                     />
                     <div
-                      class="flex flex-wrap items-center justify-between gap-2 border-t border-[#EDEDF0] px-8 py-2.5 text-[11px] text-[#98989D]"
+                      class="flex flex-wrap items-center justify-between gap-2 border-t border-[#EDEDF0] px-8 py-2.5 text-[11px] text-lo-text-2"
                     >
                       <span>
                         {{
@@ -1021,17 +1012,17 @@ const isBinaryText = computed(() => doc.value?.kind === 'pptx' || doc.value?.kin
 
             <aside
               v-if="outlineOpen"
-              class="lo-glass lo-glass-strong hidden w-[248px] shrink-0 flex-col border-l border-white/[0.06] lg:flex"
+              class="lo-glass lo-glass-strong hidden w-[248px] shrink-0 flex-col border-l border-lo-border-soft lg:flex"
             >
-              <div class="border-b border-white/[0.06] px-4 py-3">
+              <div class="border-b border-lo-border-soft px-4 py-3">
                 <div class="flex items-center justify-between">
-                  <span class="text-[12px] font-medium text-[#F5F5F7]">文档大纲</span>
+                  <span class="text-[12px] font-medium text-lo-text-1">文档大纲</span>
                   <div class="flex items-center gap-1.5">
-                    <span class="text-[11px] tabular-nums text-[#636366]">{{ outline.length }}</span>
+                    <span class="text-[11px] tabular-nums text-lo-text-4">{{ outline.length }}</span>
                     <button
                       type="button"
                       aria-label="收起大纲"
-                      class="rounded-md p-0.5 text-[#636366] transition-colors hover:text-[#F5F5F7]"
+                      class="rounded-md p-0.5 text-lo-text-4 transition-colors hover:text-lo-text-1"
                       @click="outlineOpen = false"
                     >
                       <AppIcon name="x" class="h-3.5 w-3.5" />
@@ -1047,35 +1038,35 @@ const isBinaryText = computed(() => doc.value?.kind === 'pptx' || doc.value?.kin
                 />
               </div>
               <div class="thin-scroll min-h-0 flex-1 overflow-y-auto p-2">
-                <p v-if="outline.length === 0" class="px-2 py-3 text-[12px] leading-relaxed text-[#636366]">
+                <p v-if="outline.length === 0" class="px-2 py-3 text-[12px] leading-relaxed text-lo-text-4">
                   当前文档没有标题层级。选中文本后点工具栏 H1 / H2 即可生成大纲。
                 </p>
                 <ul v-else class="flex flex-col gap-0.5">
                   <li v-for="item in filteredOutline" :key="item.id">
                     <button
                       type="button"
-                      class="flex w-full items-center gap-1.5 rounded-lg py-1.5 pr-2 text-left text-[12px] text-[#C7C7CC] outline-none transition-colors hover:bg-white/[0.06] hover:text-white focus-visible:ring-2 focus-visible:ring-[#0A84FF]/60"
+                      class="flex w-full items-center gap-1.5 rounded-lg py-1.5 pr-2 text-left text-[12px] text-lo-text-5 outline-none transition-colors hover:bg-lo-fill-2 hover:text-lo-text-1 focus-visible:ring-2 focus-visible:ring-[#0A84FF]/60"
                       :class="OUTLINE_INDENT[Math.min(item.level, 6) - 1]"
                       @click="jumpToHeading(item.index)"
                     >
-                      <AppIcon name="chevron-right" class="h-3 w-3 shrink-0 text-[#636366]" />
+                      <AppIcon name="chevron-right" class="h-3 w-3 shrink-0 text-lo-text-4" />
                       <span class="truncate">{{ item.text }}</span>
                     </button>
                   </li>
                 </ul>
               </div>
-              <div class="border-t border-white/[0.06] px-4 py-3 text-[11.5px] leading-relaxed text-[#636366]">
+              <div class="border-t border-lo-border-soft px-4 py-3 text-[11.5px] leading-relaxed text-lo-text-4">
                 <p class="flex justify-between">
                   <span>字数</span>
-                  <span class="tabular-nums text-[#A1A1A6]">{{ stats.words }}</span>
+                  <span class="tabular-nums text-lo-text-3">{{ stats.words }}</span>
                 </p>
                 <p class="mt-1 flex justify-between">
                   <span>字符</span>
-                  <span class="tabular-nums text-[#A1A1A6]">{{ stats.chars }}</span>
+                  <span class="tabular-nums text-lo-text-3">{{ stats.chars }}</span>
                 </p>
                 <p class="mt-1 flex justify-between">
                   <span>撤销栈</span>
-                  <span class="tabular-nums text-[#A1A1A6]">{{ undoDepth }}</span>
+                  <span class="tabular-nums text-lo-text-3">{{ undoDepth }}</span>
                 </p>
               </div>
             </aside>

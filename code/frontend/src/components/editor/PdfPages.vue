@@ -146,7 +146,7 @@ onBeforeUnmount(() => {
 
 <template>
   <section v-if="pages.length" ref="rootRef" class="mx-auto mb-5 w-full max-w-[860px]">
-    <div class="mb-2 flex items-center justify-between gap-3 text-[11.5px] text-[#636366]">
+    <div class="mb-2 flex items-center justify-between gap-3 text-[11.5px] text-lo-text-4">
       <span>PDF 页面 · 只渲染可视页 ±2 页（其余为占位）</span>
       <span class="tabular-nums">共 {{ pages.length }} 页</span>
     </div>
@@ -159,7 +159,7 @@ onBeforeUnmount(() => {
           <div :data-page="page.index" class="absolute inset-0" />
           <div
             v-if="states[page.index] !== 'done'"
-            class="absolute inset-0 flex flex-col items-center justify-center gap-1 px-4 text-center text-[12px] text-[#636366]"
+            class="absolute inset-0 flex flex-col items-center justify-center gap-1 px-4 text-center text-[12px] text-lo-text-4"
           >
             <span v-if="states[page.index] === 'error'" class="text-[#B3261E]">{{ errors[page.index] }}</span>
             <span v-else-if="states[page.index] === 'rendering'">第 {{ page.index }} 页渲染中…</span>

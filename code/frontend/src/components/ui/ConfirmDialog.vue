@@ -10,7 +10,7 @@ const { confirmRequest } = storeToRefs(store)
 </script>
 
 <template>
-  <div v-if="confirmRequest" class="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
+  <div v-if="confirmRequest" class="fixed inset-0 z-[60] flex items-center justify-center bg-lo-scrim px-4 backdrop-blur-sm">
     <section
       role="dialog"
       aria-modal="true"
@@ -19,23 +19,23 @@ const { confirmRequest } = storeToRefs(store)
     >
       <div class="flex items-start gap-3">
         <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#FF9F0A]/15">
-          <AppIcon name="alert-triangle" class="h-4 w-4 text-[#FFB340]" />
+          <AppIcon name="alert-triangle" class="h-4 w-4 text-lo-warning-text" />
         </span>
         <div class="min-w-0">
-          <h2 id="lo-confirm-title" class="text-[15px] font-semibold leading-snug text-[#F5F5F7]">
+          <h2 id="lo-confirm-title" class="text-[15px] font-semibold leading-snug text-lo-text-1">
             {{ confirmRequest.title }}
           </h2>
-          <p class="mt-1.5 text-[12.5px] leading-relaxed text-[#A1A1A6]">{{ confirmRequest.description }}</p>
+          <p class="mt-1.5 text-[12.5px] leading-relaxed text-lo-text-3">{{ confirmRequest.description }}</p>
         </div>
       </div>
 
-      <ul v-if="confirmRequest.detail?.length" class="mt-4 flex flex-col gap-1.5 rounded-[16px] bg-black/30 p-3">
+      <ul v-if="confirmRequest.detail?.length" class="mt-4 flex flex-col gap-1.5 rounded-[16px] bg-lo-inset p-3">
         <li
           v-for="line in confirmRequest.detail"
           :key="line"
-          class="flex items-start gap-1.5 text-[12px] leading-relaxed text-[#98989D]"
+          class="flex items-start gap-1.5 text-[12px] leading-relaxed text-lo-text-2"
         >
-          <span class="mt-[7px] h-1 w-1 shrink-0 rounded-full bg-[#636366]" />
+          <span class="mt-[7px] h-1 w-1 shrink-0 rounded-full bg-lo-text-4" />
           <span class="min-w-0 break-words">{{ line }}</span>
         </li>
       </ul>
