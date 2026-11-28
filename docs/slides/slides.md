@@ -309,7 +309,7 @@ td {
 
 #### 3.5.1 系统架构图
 
-<img src="/tool.png" width="400" class="mx-auto" />
+<img src="/tool.png" width="450" class="mx-auto" />
 
 ---
 
