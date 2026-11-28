@@ -1,0 +1,13 @@
+/* ============================================================
+ * 隐藏 Slidev 53 的导航栏（左下角/右下角按钮栏，含"目录/总览"九宫格入口）
+ *
+ * 说明：
+ * - Slidev 53 中导航栏 NavControls 的根元素是 <nav class="flex flex-col">，
+ *   本演示页中它是页面里唯一的 <nav> 元素，直接隐藏即可。
+ * - 旧版类名 .slidev-nav / .slidev-controls / .slidev-sidebar /
+ *   .slidev-toc-panel 在 Slidev 53 中已不存在，故全部移除。
+ * - "目录/总览"（Overview）默认不显示；若按 o 键打开，按 Esc 即可关闭。
+ * ============================================================ */
+nav {
+  display: none !important;
+}
