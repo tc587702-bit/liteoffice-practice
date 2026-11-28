@@ -189,7 +189,6 @@ canvasWidth: 900
 | --- | --- | --- | --- |
 | AI 服务 | FastAPI + LangGraph + LiteLLM | 0.162.0 / ≥0.2 / ≥1.50 | Agent 编排与模型路由，无 Key 降级离线 |
 | 检索 / 嵌入 | onnxruntime + bge-small-zh-v1.5 | ≥1.17 | 512 维本地向量 + BM25，RRF 融合 |
-| 协作 | Node + ws + Yjs + SQLite | 8.18.0 / 13.6.20 | 增量同步 + node:sqlite 持久化 |
 | 平台 | VS Code / 现代浏览器 | 1.90+ / Chrome/Edge 120+ | 纯前端运行，需 Worker、IndexedDB |
 
 **选型说明**：前端 Vue 3 + Pinia 承载会话状态；DOCX/XLSX/MD 用自研 zip/xml 模块，SheetJS、pdf.js 按需加载；AI 用 FastAPI + LangGraph、无 Key 即降级；协作用 Yjs CRDT + node:sqlite。版本以 `package.json` / `requirements.txt` 为准。
@@ -211,18 +210,11 @@ canvasWidth: 900
 | 阶段 | 问题 | 原因 | 解决 |
 | --- | --- | --- | --- |
 | 分析 | 能力边界模糊 | PPTX/PDF 被误认为可编辑 | 明确 DOCX/XLSX 可回写、PPTX/PDF 只读并标注 |
-| 分析 | 隐私承诺不可验证 | 在线工具默认怀疑上传 | “0 次上传”写入需求并验收，界面常驻安全状态 |
 | 设计 | 多格式会话割裂 | 各格式结构不同、无统一模型 | 统一文档会话模型，Pinia 集中管理 |
 | 设计 | 大文件阻塞 | 主线程全量渲染 | Worker 解析、分块虚拟渲染、懒加载、可取消 |
-| 设计 | AI 自信胡说 | 规则未按文体分流 | 按文体分流；语病检查通用 |
-| 开发 | DOCX 结构破坏 | 直接拼接 XML | zip/xml 按节点读写，保留包结构 |
 | 开发 | XLSX 回写丢表 | 重建工作簿 | 读原 workbook 写回，导出前校验 |
-| 开发 | 分享页 XSS | HTML 直接注入 | 白名单 sanitizeHtml 消毒 |
 | 开发 | 协作重启丢数据 | 序号与快照混用 | updates.seq 跨表单调 |
 | 测试 | 导出损坏难发现 | 只验证下载触发 | 导出自检，失败即中止 |
-| 测试 | 评测静默失效 | 库名漂移查空库 | 加空库报警 |
-| 部署 | 静态托管 404 | history 路由无 fallback | hash 路由 |
-| 部署 | 首屏慢/内存崩溃 | 全量加载解析库 | 按需加载、分级提示、可取消 |
 
 ---
 
@@ -304,34 +296,7 @@ components（只消费状态与回调）
 ![](/apps.png)
 
 ---
-
-#### 3.6.1 质量控制和保证方法
-
-- **类型纪律**：`vue-tsc --noEmit` 零错误，0 个 `any`、0 个 `@ts-ignore`。
-- **解析层自检**：`check-docx-export`（图片/关系/悬空校验）、`check-large-file`（大文件不截断）、`check-pdf`（页数/字符数/失败原因）、`check-agent-tools`（工具能发现问题且不误报）。
-- **Agent 自测**：`test_kb` 20 项、`test_react` 43 项、`test_pipelines` 34 项、`test_agent_kb` 18 项。
-- **改写护栏测试**：`test_rewrite_guard` 12 项全过；协作 `smoke.mjs` 8 项全过、`test-db-seq` 序号与消毒自检。
-- **检索评测**：原词 recall@1/3 = 22/22（100%）；同义改写 recall@1 70%→80%、recall@3 70%→90%；文体判定 33/33 正确。
-
----
-
-#### 3.6.2 质量工具使用
-
-| 工具 | 用途 |
-| --- | --- |
-| vue-tsc / Vitest | 前端类型检查与单元测试 |
-| vite build | 生产构建（主包约 217 KB） |
-| ruff | Python 静态检查（0 问题） |
-| node --check | 后端语法检查 |
-| 自研 `tools/review.py` | 自动代码审查，产出 `review-report.md` |
-| 各服务自检脚本 | `check-*.mjs` / `smoke.mjs` / `test_*.py`，本地可一键复现 |
-
----
-
 ### 3.7 代码统计
-
-> 
-> 快照：2026-11 代码审查（`review-report.md`）。
 
 | 语言 | 文件数 | 行数 |
 | --- | --- | --- |
@@ -341,15 +306,28 @@ components（只消费状态与回调）
 | Python | 6 | 834 |
 | 合计 | 57 | 9,389 |
 
-补充：前端运行时依赖 5 个，生产主包约 217 KB；AI 语料 77 份 / 2,486 块，向量 2,486/2,486 全覆盖（`bge-small-zh-v1.5`，512 维）。
 ---
-
 # 4. 智能体技术设计
 
 > 总原则：**规则做确定的事，模型做理解的事；模型输出先过护栏再进文档。**
 > 五个部件：编排 · 工具 · 记忆 · 护栏 · 知识库。
 > 代码位置：`code/agent/app/graph.py`（编排）· `tools.py`（工具）· `polish_guard.py`（护栏）· `embed.py`（检索）· `feedback.py`（记忆）· `code/agent/data/kb.db`（知识库）。
 
+---
+**LiteOffice 智能体五个组成**
+
+| 组成 | 代码位置（文件名） | 实现 |
+| --- | --- | --- |
+| 任务编排 | `graph.py` | LangGraph 编排 ReAct 循环（plan → call_tool → respond），步数上限 5；意图先验命中即省一次模型调用 |
+| 工具调用 | `tools.py` | 14 个工具：统计 / 结构 / 检索 / 检查 / 取数；文本 JSON 三层解析兜底，工具结果不经模型二次生成 |
+| 记忆 | `feedback.py` | 会话 / 偏好 / 工作区三层记忆；只影响「提不提示、是否降权」，不参与生成 |
+| 护栏 | `polish_guard.py` | normalize / polish / correct / 深度分析四套口径，服务端确定性判定，不过即退回规则版 |
+| 专业知识库 | `embed.py` + `kb.db` | 77 份文档、2486 块；BM25 + 向量两路召回，RRF 融合，全部本地不上传 |
+
+<style>
+table { font-size: 0.75em; }
+td { line-height: 1.4; }
+</style>
 ---
 
 ## 4.1 一个请求怎么走完：选工具、取材料、受约束、给结果
